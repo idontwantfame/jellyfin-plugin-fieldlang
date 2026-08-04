@@ -98,6 +98,19 @@ Long-standing upstream requests for the same thing:
 [jellyfin-web#332](https://github.com/jellyfin/jellyfin-web/issues/332),
 [#16400](https://github.com/jellyfin/jellyfin/issues/16400).
 
+## AI disclosure
+
+This plugin was written with substantial AI assistance (Claude), as
+[Jellyfin's LLM policy](https://jellyfin.org/docs/general/contributing/llm-policies/) asks
+third-party projects to state.
+
+It is not untested output. It was verified end to end against a live Jellyfin 10.11.11 library —
+699 items swept, titles left in English while descriptions came back in Turkish, and fields with no
+data in the target language left alone rather than blanked. The task-versus-provider design came
+from reading `MetadataService.ExecuteRemoteProviders` rather than guessing at it.
+
+Bugs are mine. Issues and pull requests welcome.
+
 ## License
 
 MIT

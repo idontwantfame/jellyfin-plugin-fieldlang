@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Field Language</title>
+</head>
+<body>
+<div id="FieldLangConfigPage" data-role="page" class="page type-interior pluginConfigurationPage"
+     data-controller="__plugin/FieldLang/configPage.js">
+    <div data-role="content">
+        <div class="content-primary">
+            <form id="FieldLangConfigForm">
+
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="txtTmdbApiKey">TMDb API key</label>
+                    <input is="emby-input" type="text" id="txtTmdbApiKey" name="txtTmdbApiKey" />
+                    <div class="fieldDescription">
+                        Required. The server's built-in TMDb key is compiled into the core assembly and
+                        cannot be reached from a plugin, so this plugin needs its own. A free v3 key from
+                        themoviedb.org works.
+                    </div>
+                </div>
+
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label class="emby-checkbox-label">
+                        <input is="emby-checkbox" type="checkbox" id="chkLockFields" />
+                        <span>Lock applied fields</span>
+                    </label>
+                    <div class="fieldDescription checkboxFieldDescription">
+                        Pins each applied field so the normal metadata provider stops overwriting it.
+                        With this off, the provider rewrites the field on every refresh and this plugin
+                        puts it back afterwards &mdash; still correct, but the wrong language is briefly
+                        visible. Tagline has no lock in Jellyfin and always relies on re-application.
+                    </div>
+                </div>
+
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label class="emby-checkbox-label">
+                        <input is="emby-checkbox" type="checkbox" id="chkApplyOnUpdate" />
+                        <span>Apply as items change</span>
+                    </label>
+                    <div class="fieldDescription checkboxFieldDescription">
+                        Applies rules immediately when an item is added or refreshed. With this off,
+                        only the scheduled task applies them.
+                    </div>
+                </div>
+
+                <br />
+                <h3>Rules</h3>
+                <div class="fieldDescription" style="margin-bottom:1.5em;">
+                    Leave a language blank to leave that field alone &mdash; the plugin only touches fields
+                    you give a language. Use an ISO 639-1 code, optionally region-qualified: <code>tr</code>,
+                    <code>en</code>, <code>de</code>, <code>pt-BR</code>. If TMDb has no data for a field in
+                    the language you pick, the existing value is kept rather than blanked.
+                </div>
+
+                <div id="FieldLangRules"></div>
+
+                <div>
+                    <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                        <span>Save</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        (function () {
+            var pluginId = '6b2f4a3c-9d51-4f27-8a6e-1c0d7b5e93a4';
+
+            function buildRules(container, schema, config) {
+                container.innerHTML = '';
+
+                // Index saved rules for quick lookup: libraryId -> itemType -> field -> language
+                var saved = {};
+                (config.Libraries || []).forEach(function (lib) {
+                    saved[lib.LibraryId] = saved[lib.LibraryId] || {};
+                    (lib.Rules || []).forEach(function (r) {
+                        saved[lib.LibraryId][r.ItemType] = saved[lib.LibraryId][r.ItemType] || {};
+                        saved[lib.LibraryId][r.ItemType][r.Field] = r.Language;
+                    });
+                });
+
+                schema.Libraries.forEach(function (lib) {
+                    var section = document.createElement('div');
+                    section.className = 'verticalSection';
+
+                    var heading = document.createElement('h3');
+                    heading.className = 'sectionTitle';
+                    heading.textContent = lib.Name;
+                    section.appendChild(heading);
+
+                    var any = false;
+
+                    schema.ItemTypes.forEach(function (type) {
+                        // Only offer item types that can actually appear in this library.
+                        if (!typeAppliesTo(lib.CollectionType, type.Name)) {
+                            return;
+                        }
+
+                        any = true;
+
+                        var typeLabel = document.createElement('div');
+                        typeLabel.style.cssText = 'margin:0.6em 0 0.2em;opacity:0.75;font-weight:600;';
+                        typeLabel.textContent = type.Name;
+                        section.appendChild(typeLabel);
+
+                        type.Fields.forEach(function (field) {
+                            var wrap = document.createElement('div');
+                            wrap.className = 'inputContainer';
+                            wrap.style.cssText = 'display:flex;align-items:center;gap:1em;margin-bottom:0.4em;';
+
+                            var label = document.createElement('label');
+                            label.className = 'inputLabel';
+                            label.style.cssText = 'min-width:9em;margin:0;';
+                            label.textContent = field.Label;
+
+                            var input = document.createElement('input');
+                            input.setAttribute('is', 'emby-input');
+                            input.type = 'text';
+                            input.style.maxWidth = '10em';
+                            input.placeholder = 'default';
+                            input.setAttribute('data-library', lib.Id);
+                            input.setAttribute('data-library-name', lib.Name);
+                            input.setAttribute('data-type', type.Name);
+                            input.setAttribute('data-field', field.Name);
+                            input.value = (saved[lib.Id] && saved[lib.Id][type.Name] && saved[lib.Id][type.Name][field.Name]) || '';
+
+                            wrap.appendChild(label);
+                            wrap.appendChild(input);
+
+                            if (!field.Lockable) {
+                                var note = document.createElement('span');
+                                note.className = 'fieldDescription';
+                                note.style.margin = '0';
+                                note.textContent = 'cannot be locked';
+                                wrap.appendChild(note);
+                            }
+
+                            section.appendChild(wrap);
+                        });
+                    });
+
+                    if (any) {
+                        container.appendChild(section);
+                    }
+                });
+            }
+
+            // Library kinds that hold none of the item types this plugin can localize. Rendering
+            // controls for them would only offer settings that could never fire.
+            var IRRELEVANT = ['boxsets', 'playlists', 'livetv', 'music', 'musicvideos', 'books',
+                              'photos', 'homevideos', 'folders'];
+
+            function typeAppliesTo(collectionType, itemType) {
+                var ct = (collectionType || '').toLowerCase();
+                if (IRRELEVANT.indexOf(ct) !== -1) {
+                    return false;
+                }
+                if (ct === 'movies') {
+                    return itemType === 'Movie';
+                }
+                if (ct === 'tvshows') {
+                    return itemType === 'Series' || itemType === 'Season' || itemType === 'Episode';
+                }
+                // Mixed or unknown library: offer everything rather than guess wrong.
+                return true;
+            }
+
+            function collectRules(container) {
+                var byLibrary = {};
+
+                container.querySelectorAll('input[data-field]').forEach(function (input) {
+                    var lang = (input.value || '').trim();
+                    if (!lang) {
+                        return;
+                    }
+
+                    var id = input.getAttribute('data-library');
+                    if (!byLibrary[id]) {
+                        byLibrary[id] = {
+                            LibraryId: id,
+                            LibraryName: input.getAttribute('data-library-name'),
+                            Rules: []
+                        };
+                    }
+
+                    byLibrary[id].Rules.push({
+                        ItemType: input.getAttribute('data-type'),
+                        Field: input.getAttribute('data-field'),
+                        Language: lang
+                    });
+                });
+
+                return Object.keys(byLibrary).map(function (k) { return byLibrary[k]; });
+            }
+
+            function load(page) {
+                Dashboard.showLoadingMsg();
+
+                Promise.all([
+                    ApiClient.getPluginConfiguration(pluginId),
+                    ApiClient.getJSON(ApiClient.getUrl('FieldLang/Schema'))
+                ]).then(function (results) {
+                    var config = results[0];
+                    var schema = results[1];
+
+                    page.querySelector('#txtTmdbApiKey').value = config.TmdbApiKey || '';
+                    page.querySelector('#chkLockFields').checked = config.LockAppliedFields !== false;
+                    page.querySelector('#chkApplyOnUpdate').checked = config.ApplyOnItemUpdate !== false;
+
+                    buildRules(page.querySelector('#FieldLangRules'), schema, config);
+                    Dashboard.hideLoadingMsg();
+                }).catch(function () {
+                    Dashboard.hideLoadingMsg();
+                    Dashboard.alert('Failed to load Field Language configuration.');
+                });
+            }
+
+            document.querySelector('#FieldLangConfigPage').addEventListener('pageshow', function () {
+                load(this);
+            });
+
+            document.querySelector('#FieldLangConfigForm').addEventListener('submit', function (e) {
+                e.preventDefault();
+                Dashboard.showLoadingMsg();
+
+                var page = document.querySelector('#FieldLangConfigPage');
+
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    config.TmdbApiKey = page.querySelector('#txtTmdbApiKey').value.trim();
+                    config.LockAppliedFields = page.querySelector('#chkLockFields').checked;
+                    config.ApplyOnItemUpdate = page.querySelector('#chkApplyOnUpdate').checked;
+                    config.Libraries = collectRules(page.querySelector('#FieldLangRules'));
+
+                    ApiClient.updatePluginConfiguration(pluginId, config).then(function (result) {
+                        Dashboard.processPluginConfigurationUpdateResult(result);
+                    });
+                });
+
+                return false;
+            });
+        })();
+    </script>
+</div>
+</body>
+</html>

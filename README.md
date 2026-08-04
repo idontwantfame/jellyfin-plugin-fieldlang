@@ -26,11 +26,19 @@ than blanked.
 
 ## Install
 
-Download the release, drop `Jellyfin.Plugin.FieldLang.dll` and `meta.json` into
-`<config>/plugins/Field Language_1.0.0.0/`, restart the server.
+Dashboard → Plugins → Repositories → add:
 
-Then in Dashboard → Plugins → Field Language: paste your TMDb key, expand a library, put a language
-code next to the fields you want, save.
+```
+https://raw.githubusercontent.com/rbcetin/jellyfin-plugin-fieldlang/main/manifest.json
+```
+
+Then install Field Language from the catalogue and restart.
+
+Or do it by hand: unzip the [release](https://github.com/rbcetin/jellyfin-plugin-fieldlang/releases)
+into `<config>/plugins/Field Language_1.0.0.0/` and restart.
+
+Either way, finish in Dashboard → Plugins → Field Language: paste your TMDb key, expand a library,
+put a language code next to the fields you want, save.
 
 Rules are applied by the **Apply per-field metadata languages** scheduled task, which runs daily.
 Run it from Dashboard → Scheduled Tasks to apply a change immediately.

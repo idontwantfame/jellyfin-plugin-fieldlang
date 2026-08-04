@@ -14,9 +14,15 @@
                     <label class="inputLabel inputLabelUnfocused" for="txtTmdbApiKey">TMDb API key</label>
                     <input is="emby-input" type="text" id="txtTmdbApiKey" name="txtTmdbApiKey" />
                     <div class="fieldDescription">
-                        Required. The server's built-in TMDb key is compiled into the core assembly and
-                        cannot be reached from a plugin, so this plugin needs its own. A free v3 key from
-                        themoviedb.org works.
+                        Required. Jellyfin's built-in TMDb key is compiled into the server assembly and
+                        cannot be reached from a plugin, so this plugin needs its own. A free v3 key works
+                        &mdash; register at
+                        <a is="emby-linkbutton" class="button-link" target="_blank" rel="noopener noreferrer"
+                           href="https://www.themoviedb.org/signup">themoviedb.org/signup</a>,
+                        then copy the <em>API Read Access</em> v3 key from
+                        <a is="emby-linkbutton" class="button-link" target="_blank" rel="noopener noreferrer"
+                           href="https://www.themoviedb.org/settings/api">Settings &rarr; API</a>.
+                        Nothing is sent anywhere except TMDb.
                     </div>
                 </div>
 

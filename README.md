@@ -76,13 +76,19 @@ a null/empty localized value means "keep what the core provider wrote".
 
 ## Locking
 
-With **Lock applied fields** on (the default), each applied field is added to the item's
-`LockedFields`, so the normal provider stops overwriting it. With it off, the provider rewrites the
-field on every refresh and this plugin puts it back afterwards — still correct, but the wrong
-language is briefly visible.
+Each rule carries its own **lock** toggle, on by default. Locking adds that field to the item's
+`LockedFields`, so the normal provider stops overwriting it. Unlocked, the provider rewrites the
+field on every refresh and the next task run puts it back — still correct, but the wrong language is
+visible in between.
+
+Per-rule rather than global because the right answer differs by field: you may want a pinned
+description while genres keep tracking whatever TMDb publishes.
+
+Unticking a lock actively **removes** it, so a lock set by an earlier run can always be released
+from the config page rather than needing a manual edit on the item.
 
 Tagline has no corresponding `MetadataField` in Jellyfin and therefore cannot be locked; it always
-relies on re-application. The config page marks it.
+relies on re-application, and the config page shows no checkbox for it.
 
 ## Building
 

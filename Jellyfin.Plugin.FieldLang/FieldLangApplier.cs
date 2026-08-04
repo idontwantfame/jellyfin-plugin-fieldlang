@@ -92,9 +92,15 @@ public sealed class FieldLangApplier
                     _logger.LogDebug("FieldLang: {Item} {Field} -> {Language}", item.Name, rule.Field, rule.Language);
                 }
 
-                if (config.LockAppliedFields && field.LockField is { } lockField)
+                if (rule.Lock && field.LockField is { } lockField)
                 {
                     locked.Add(lockField);
+                }
+                else if (!rule.Lock && field.LockField is { } unlockField)
+                {
+                    // Unticking the box has to actually release the field, otherwise a lock set by
+                    // an earlier run would stay forever with no way back short of editing the item.
+                    locked.Remove(unlockField);
                 }
             }
         }

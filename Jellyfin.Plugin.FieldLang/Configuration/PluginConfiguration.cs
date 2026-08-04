@@ -18,6 +18,18 @@ public class FieldLanguageRule
     /// Empty means "leave alone" -- the plugin will not touch the field at all.
     /// </summary>
     public string Language { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether this field is pinned against future provider writes.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to true, which is also what a configuration saved before this setting existed
+    /// deserializes to -- XmlSerializer leaves an absent element at its initialized value, so
+    /// upgrading does not silently turn locking off.
+    /// Ignored for fields with no corresponding <see cref="MediaBrowser.Model.Entities.MetadataField"/>
+    /// (Tagline), which Jellyfin cannot lock at all.
+    /// </remarks>
+    public bool Lock { get; set; } = true;
 }
 
 /// <summary>
@@ -50,17 +62,6 @@ public class PluginConfiguration : BasePluginConfiguration
     /// the core assembly and is not reachable from a plugin.
     /// </summary>
     public string TmdbApiKey { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Gets or sets a value indicating whether an applied field is also locked against future provider writes.
-    /// </summary>
-    /// <remarks>
-    /// On by default. Without it the core provider rewrites the field on every refresh and the plugin
-    /// puts it back afterwards, which works but leaves a visible window of the wrong language. Fields
-    /// with no corresponding <see cref="MediaBrowser.Model.Entities.MetadataField"/> (Tagline) cannot be
-    /// locked and always rely on re-application.
-    /// </remarks>
-    public bool LockAppliedFields { get; set; } = true;
 
     /// <summary>Gets or sets the per-library rule sets.</summary>
     public List<LibraryRuleSet> Libraries { get; set; } = new();

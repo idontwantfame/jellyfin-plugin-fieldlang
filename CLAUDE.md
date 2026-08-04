@@ -66,8 +66,14 @@ not a suppression set.
 ## Config model
 
 `PluginConfiguration` → `Libraries[]` (`LibraryRuleSet`) → `Rules[]` (`FieldLanguageRule`:
-ItemType + Field + Language). Empty language = leave the field alone. Global settings:
-`TmdbApiKey`, `LockAppliedFields` (default true).
+ItemType + Field + Language + Lock). Empty language = leave the field alone. Only global setting is
+`TmdbApiKey`.
+
+**`Lock` is per rule** (was a single global `LockAppliedFields` until 2026-08-04). It defaults to
+`true`, which also covers configs written before the field existed — `XmlSerializer` leaves an
+absent element at its initialized value, so upgrading doesn't silently disable locking. Unticking
+actively **removes** the lock from `LockedFields`, otherwise a lock set by an earlier run would be
+unreleasable from the config page.
 
 **The config page is generic** — it renders from `GET /FieldLang/Schema` (libraries × field
 catalog), so adding a field means editing `FieldCatalog` + the TMDb mapper only. No HTML edit.

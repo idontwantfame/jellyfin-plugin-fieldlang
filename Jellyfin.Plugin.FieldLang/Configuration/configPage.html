@@ -28,6 +28,8 @@
         .fieldLangLabel { min-width: 8em; margin: 0; }
         .fieldLangInput { max-width: 9em; }
         .fieldLangNote { opacity: .55; font-size: .85em; }
+        .fieldLangLock { display: flex; align-items: center; gap: .35em; margin: 0; opacity: .8; }
+        .fieldLangLock span { font-size: .85em; }
     </style>
     <div data-role="content">
         <div class="content-primary">
@@ -49,19 +51,6 @@
                     </div>
                 </div>
 
-                <div class="checkboxContainer checkboxContainer-withDescription">
-                    <label class="emby-checkbox-label">
-                        <input is="emby-checkbox" type="checkbox" id="chkLockFields" />
-                        <span>Lock applied fields</span>
-                    </label>
-                    <div class="fieldDescription checkboxFieldDescription">
-                        Pins each applied field so the normal metadata provider stops overwriting it.
-                        With this off, the provider rewrites the field on every refresh and this plugin
-                        puts it back afterwards &mdash; still correct, but the wrong language is briefly
-                        visible. Tagline has no lock in Jellyfin and always relies on re-application.
-                    </div>
-                </div>
-
                 <div class="fieldDescription" style="margin-top:1em;">
                     Rules are applied by the <strong>Apply per-field metadata languages</strong> scheduled
                     task, which runs daily by default. Run it from
@@ -76,6 +65,11 @@
                     you give a language. Use an ISO 639-1 code, optionally region-qualified: <code>tr</code>,
                     <code>en</code>, <code>de</code>, <code>pt-BR</code>. If TMDb has no data for a field in
                     the language you pick, the existing value is kept rather than blanked.
+                    <br /><br />
+                    <strong>Lock</strong> pins that one field so the normal metadata provider stops
+                    overwriting it. Unlocked, the provider rewrites it on every refresh and this plugin
+                    puts it back on the next run &mdash; still correct, but the wrong language is visible
+                    in between. Tagline has no lock in Jellyfin, so it always works the second way.
                 </div>
 
                 <div id="FieldLangRules"></div>
@@ -104,13 +98,13 @@
             // with document.createElement('input') + setAttribute('is', ...) are never upgraded,
             // so they would render as unstyled inputs.
             function buildRules(container, schema, config) {
-                // Index saved rules for quick lookup: libraryId -> itemType -> field -> language
+                // Index saved rules for quick lookup: libraryId -> itemType -> field -> rule
                 var saved = {};
                 (config.Libraries || []).forEach(function (lib) {
                     saved[lib.LibraryId] = saved[lib.LibraryId] || {};
                     (lib.Rules || []).forEach(function (r) {
                         saved[lib.LibraryId][r.ItemType] = saved[lib.LibraryId][r.ItemType] || {};
-                        saved[lib.LibraryId][r.ItemType][r.Field] = r.Language;
+                        saved[lib.LibraryId][r.ItemType][r.Field] = r;
                     });
                 });
 
@@ -132,8 +126,12 @@
                         body += '<div class="fieldLangType">' + esc(type.Name) + '</div>';
 
                         type.Fields.forEach(function (field) {
-                            var val = (saved[lib.Id] && saved[lib.Id][type.Name]
-                                && saved[lib.Id][type.Name][field.Name]) || '';
+                            var rule = (saved[lib.Id] && saved[lib.Id][type.Name]
+                                && saved[lib.Id][type.Name][field.Name]) || null;
+                            var val = rule ? rule.Language : '';
+                            // New rows default to locked; that matches the server-side default.
+                            var locked = rule ? rule.Lock !== false : true;
+
                             if (val) {
                                 setCount++;
                             }
@@ -147,7 +145,11 @@
                                 + ' data-type="' + esc(type.Name) + '"'
                                 + ' data-field="' + esc(field.Name) + '"'
                                 + ' value="' + esc(val) + '" />'
-                                + (field.Lockable ? '' : '<span class="fieldLangNote">cannot be locked</span>')
+                                + (field.Lockable
+                                    ? '<label class="fieldLangLock"><input is="emby-checkbox" type="checkbox"'
+                                        + ' data-lock-for="' + esc(lib.Id + '|' + type.Name + '|' + field.Name) + '"'
+                                        + (locked ? ' checked' : '') + ' /><span>lock</span></label>'
+                                    : '<span class="fieldLangNote">cannot be locked</span>')
                                 + '</div>';
                         });
                     });
@@ -219,6 +221,9 @@
                     }
 
                     var id = input.getAttribute('data-library');
+                    var type = input.getAttribute('data-type');
+                    var field = input.getAttribute('data-field');
+
                     if (!byLibrary[id]) {
                         byLibrary[id] = {
                             LibraryId: id,
@@ -227,10 +232,16 @@
                         };
                     }
 
+                    // Fields Jellyfin cannot lock have no checkbox; persist false for them so the
+                    // saved rule says what actually happens rather than an aspirational true.
+                    var lock = container.querySelector(
+                        '[data-lock-for="' + id + '|' + type + '|' + field + '"]');
+
                     byLibrary[id].Rules.push({
-                        ItemType: input.getAttribute('data-type'),
-                        Field: input.getAttribute('data-field'),
-                        Language: lang
+                        ItemType: type,
+                        Field: field,
+                        Language: lang,
+                        Lock: lock ? lock.checked : false
                     });
                 });
 
@@ -248,7 +259,6 @@
                     var schema = results[1];
 
                     page.querySelector('#txtTmdbApiKey').value = config.TmdbApiKey || '';
-                    page.querySelector('#chkLockFields').checked = config.LockAppliedFields !== false;
 
                     buildRules(page.querySelector('#FieldLangRules'), schema, config);
                     Dashboard.hideLoadingMsg();
@@ -270,7 +280,6 @@
 
                 ApiClient.getPluginConfiguration(pluginId).then(function (config) {
                     config.TmdbApiKey = page.querySelector('#txtTmdbApiKey').value.trim();
-                    config.LockAppliedFields = page.querySelector('#chkLockFields').checked;
                     config.Libraries = collectRules(page.querySelector('#FieldLangRules'));
 
                     ApiClient.updatePluginConfiguration(pluginId, config).then(function (result) {

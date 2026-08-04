@@ -1,3 +1,4 @@
+using System.Globalization;
 using Jellyfin.Plugin.FieldLang.Configuration;
 using Jellyfin.Plugin.FieldLang.Tmdb;
 using MediaBrowser.Controller.Entities;
@@ -29,6 +30,18 @@ public sealed class FieldLangApplier
         _logger = logger;
     }
 
+    /// <summary>Maps a Jellyfin item to a catalog item type.</summary>
+    /// <param name="item">The item.</param>
+    /// <returns>The item type name, or null when unsupported.</returns>
+    public static string? ResolveItemType(BaseItem item) => item switch
+    {
+        Movie => FieldCatalog.Movie,
+        Series => FieldCatalog.Series,
+        Season => FieldCatalog.Season,
+        Episode => FieldCatalog.Episode,
+        _ => null,
+    };
+
     /// <summary>
     /// Applies every matching rule to one item and saves it if anything actually changed.
     /// </summary>
@@ -37,19 +50,12 @@ public sealed class FieldLangApplier
     /// <returns>True when the item was modified and written back.</returns>
     /// <remarks>
     /// Writing only on a real difference keeps repeat sweeps cheap: a second run over an
-    /// already-correct library issues no database writes at all, so the task is safe to schedule
-    /// frequently and safe to re-run by hand.
+    /// already-correct library issues no database writes at all.
     /// </remarks>
     public async Task<bool> ApplyAsync(BaseItem item, CancellationToken cancellationToken)
     {
         var config = Plugin.Instance?.Configuration;
-        if (config is null || config.Libraries.Count == 0)
-        {
-            return false;
-        }
-
-        var itemType = ResolveItemType(item);
-        if (itemType is null)
+        if (config is null || ResolveItemType(item) is not { } itemType)
         {
             return false;
         }
@@ -60,14 +66,12 @@ public sealed class FieldLangApplier
             return false;
         }
 
-        // One TMDb call per distinct language, not per rule.
-        var byLanguage = rules.GroupBy(r => r.Language, StringComparer.OrdinalIgnoreCase);
-
         var changed = false;
         var locked = new HashSet<MetadataField>(item.LockedFields ?? Array.Empty<MetadataField>());
-        var lockedChanged = false;
+        var lockedBefore = locked.Count;
 
-        foreach (var group in byLanguage)
+        // One TMDb request per distinct language, not per rule.
+        foreach (var group in rules.GroupBy(r => r.Language, StringComparer.OrdinalIgnoreCase))
         {
             var localized = await FetchAsync(item, itemType, group.Key, cancellationToken).ConfigureAwait(false);
             if (localized is null)
@@ -77,38 +81,25 @@ public sealed class FieldLangApplier
 
             foreach (var rule in group)
             {
-                var definition = FieldCatalog.Find(itemType, rule.Field);
-                if (definition is null)
+                if (FieldCatalog.Find(itemType, rule.Field) is not { } field)
                 {
                     continue;
                 }
 
-                var value = localized.Get(rule.Field);
-                if (value is null)
-                {
-                    // TMDb has no data for this field in this language. Leave whatever the core
-                    // provider wrote rather than blanking it.
-                    continue;
-                }
-
-                if (ApplyValue(item, rule.Field, value))
+                if (field.Apply(localized, item))
                 {
                     changed = true;
-                    _logger.LogDebug(
-                        "FieldLang: {Item} {Field} -> {Language}",
-                        item.Name,
-                        rule.Field,
-                        rule.Language);
+                    _logger.LogDebug("FieldLang: {Item} {Field} -> {Language}", item.Name, rule.Field, rule.Language);
                 }
 
-                if (config.LockAppliedFields && definition.LockField.HasValue && locked.Add(definition.LockField.Value))
+                if (config.LockAppliedFields && field.LockField is { } lockField)
                 {
-                    lockedChanged = true;
+                    locked.Add(lockField);
                 }
             }
         }
 
-        if (lockedChanged)
+        if (locked.Count != lockedBefore)
         {
             item.LockedFields = locked.ToArray();
             changed = true;
@@ -123,29 +114,12 @@ public sealed class FieldLangApplier
         return true;
     }
 
-    /// <summary>Maps a Jellyfin item to a catalog item type.</summary>
-    /// <param name="item">The item.</param>
-    /// <returns>The item type name, or null when unsupported.</returns>
-    public static string? ResolveItemType(BaseItem item) => item switch
-    {
-        Movie => FieldCatalog.Movie,
-        Series => FieldCatalog.Series,
-        Season => FieldCatalog.Season,
-        Episode => FieldCatalog.Episode,
-        _ => null,
-    };
-
     private List<FieldLanguageRule> ResolveRules(BaseItem item, string itemType, PluginConfiguration config)
     {
         // Match by library id, so renaming a library in Jellyfin does not orphan its rules.
         var libraryIds = _libraryManager.GetCollectionFolders(item)
-            .Select(f => f.Id.ToString("N", System.Globalization.CultureInfo.InvariantCulture))
+            .Select(f => f.Id.ToString("N", CultureInfo.InvariantCulture))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        if (libraryIds.Count == 0)
-        {
-            return new List<FieldLanguageRule>();
-        }
 
         return config.Libraries
             .Where(l => libraryIds.Contains(l.LibraryId))
@@ -155,110 +129,30 @@ public sealed class FieldLangApplier
             .ToList();
     }
 
-    private async Task<LocalizedFields?> FetchAsync(BaseItem item, string itemType, string language, CancellationToken cancellationToken)
+    private Task<LocalizedFields?> FetchAsync(BaseItem item, string itemType, string language, CancellationToken cancellationToken)
     {
+        var none = Task.FromResult<LocalizedFields?>(null);
+
         switch (itemType)
         {
-            case FieldCatalog.Movie:
-            {
-                var id = item.GetProviderId(MetadataProvider.Tmdb);
-                return string.IsNullOrEmpty(id)
-                    ? null
-                    : await _tmdb.GetMovieAsync(id, language, cancellationToken).ConfigureAwait(false);
-            }
+            case FieldCatalog.Movie when item.GetProviderId(MetadataProvider.Tmdb) is { Length: > 0 } id:
+                return _tmdb.GetMovieAsync(id, language, cancellationToken);
 
-            case FieldCatalog.Series:
-            {
-                var id = item.GetProviderId(MetadataProvider.Tmdb);
-                return string.IsNullOrEmpty(id)
-                    ? null
-                    : await _tmdb.GetSeriesAsync(id, language, cancellationToken).ConfigureAwait(false);
-            }
+            case FieldCatalog.Series when item.GetProviderId(MetadataProvider.Tmdb) is { Length: > 0 } id:
+                return _tmdb.GetSeriesAsync(id, language, cancellationToken);
 
-            case FieldCatalog.Season:
-            {
-                if (item is not Season season || season.IndexNumber is null)
-                {
-                    return null;
-                }
+            // Seasons and episodes are addressed through their series, so they need the parent's id
+            // plus their own numbering -- a loose episode with no series link cannot be looked up.
+            case FieldCatalog.Season when item is Season { IndexNumber: { } season } s
+                                          && s.Series?.GetProviderId(MetadataProvider.Tmdb) is { Length: > 0 } seriesId:
+                return _tmdb.GetSeasonAsync(seriesId, season, language, cancellationToken);
 
-                var seriesId = season.Series?.GetProviderId(MetadataProvider.Tmdb);
-                return string.IsNullOrEmpty(seriesId)
-                    ? null
-                    : await _tmdb.GetSeasonAsync(seriesId, season.IndexNumber.Value, language, cancellationToken).ConfigureAwait(false);
-            }
-
-            case FieldCatalog.Episode:
-            {
-                if (item is not Episode episode
-                    || episode.ParentIndexNumber is null
-                    || episode.IndexNumber is null)
-                {
-                    return null;
-                }
-
-                var seriesId = episode.Series?.GetProviderId(MetadataProvider.Tmdb);
-                return string.IsNullOrEmpty(seriesId)
-                    ? null
-                    : await _tmdb.GetEpisodeAsync(
-                        seriesId,
-                        episode.ParentIndexNumber.Value,
-                        episode.IndexNumber.Value,
-                        language,
-                        cancellationToken).ConfigureAwait(false);
-            }
+            case FieldCatalog.Episode when item is Episode { ParentIndexNumber: { } season, IndexNumber: { } number } e
+                                           && e.Series?.GetProviderId(MetadataProvider.Tmdb) is { Length: > 0 } seriesId:
+                return _tmdb.GetEpisodeAsync(seriesId, season, number, language, cancellationToken);
 
             default:
-                return null;
-        }
-    }
-
-    private static bool ApplyValue(BaseItem item, string field, object value)
-    {
-        switch (field)
-        {
-            case "Name":
-                var name = (string)value;
-                if (string.Equals(item.Name, name, StringComparison.Ordinal))
-                {
-                    return false;
-                }
-
-                item.Name = name;
-                return true;
-
-            case "Overview":
-                var overview = (string)value;
-                if (string.Equals(item.Overview, overview, StringComparison.Ordinal))
-                {
-                    return false;
-                }
-
-                item.Overview = overview;
-                return true;
-
-            case "Tagline":
-                var tagline = (string)value;
-                if (string.Equals(item.Tagline, tagline, StringComparison.Ordinal))
-                {
-                    return false;
-                }
-
-                item.Tagline = tagline;
-                return true;
-
-            case "Genres":
-                var genres = (string[])value;
-                if (item.Genres is not null && item.Genres.SequenceEqual(genres, StringComparer.Ordinal))
-                {
-                    return false;
-                }
-
-                item.Genres = genres;
-                return true;
-
-            default:
-                return false;
+                return none;
         }
     }
 }

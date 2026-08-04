@@ -17,6 +17,14 @@ namespace Jellyfin.Plugin.FieldLang.ScheduledTasks;
 /// </remarks>
 public class ApplyFieldLanguagesTask : IScheduledTask
 {
+    private static readonly Dictionary<string, BaseItemKind> _kinds = new(StringComparer.Ordinal)
+    {
+        [FieldCatalog.Movie] = BaseItemKind.Movie,
+        [FieldCatalog.Series] = BaseItemKind.Series,
+        [FieldCatalog.Season] = BaseItemKind.Season,
+        [FieldCatalog.Episode] = BaseItemKind.Episode,
+    };
+
     private readonly ILibraryManager _libraryManager;
     private readonly FieldLangApplier _applier;
     private readonly TmdbLocalizedClient _tmdb;
@@ -82,34 +90,17 @@ public class ApplyFieldLanguagesTask : IScheduledTask
         // Start from a clean cache so a manual run picks up upstream TMDb edits.
         _tmdb.ClearCache();
 
-        var kinds = new List<BaseItemKind>();
-        var configuredTypes = config.Libraries
+        // Only query the item kinds that actually have a rule -- no point walking every episode
+        // in the library when the only rule is on movies.
+        var kinds = config.Libraries
             .SelectMany(l => l.Rules)
             .Where(r => !string.IsNullOrWhiteSpace(r.Language))
-            .Select(r => r.ItemType)
-            .ToHashSet(StringComparer.Ordinal);
+            .Select(r => _kinds.TryGetValue(r.ItemType, out var kind) ? kind : (BaseItemKind?)null)
+            .OfType<BaseItemKind>()
+            .Distinct()
+            .ToArray();
 
-        if (configuredTypes.Contains(FieldCatalog.Movie))
-        {
-            kinds.Add(BaseItemKind.Movie);
-        }
-
-        if (configuredTypes.Contains(FieldCatalog.Series))
-        {
-            kinds.Add(BaseItemKind.Series);
-        }
-
-        if (configuredTypes.Contains(FieldCatalog.Season))
-        {
-            kinds.Add(BaseItemKind.Season);
-        }
-
-        if (configuredTypes.Contains(FieldCatalog.Episode))
-        {
-            kinds.Add(BaseItemKind.Episode);
-        }
-
-        if (kinds.Count == 0)
+        if (kinds.Length == 0)
         {
             _logger.LogInformation("FieldLang: rules exist but no language is set on any of them");
             progress.Report(100);
@@ -118,7 +109,7 @@ public class ApplyFieldLanguagesTask : IScheduledTask
 
         var items = _libraryManager.GetItemList(new InternalItemsQuery
         {
-            IncludeItemTypes = kinds.ToArray(),
+            IncludeItemTypes = kinds,
             IsVirtualItem = false,
             Recursive = true,
         });

@@ -10,6 +10,25 @@
      Either ship a controller .js as its own embedded resource, or use an inline script and omit
      the attribute -- not one with the other. -->
 <div id="FieldLangConfigPage" data-role="page" class="page type-interior pluginConfigurationPage">
+    <style>
+        .fieldLangLib { border-bottom: 1px solid rgba(127,127,127,.3); }
+        .fieldLangSummary {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 1em; padding: .9em .2em; cursor: pointer; user-select: none;
+        }
+        .fieldLangSummary:hover { background: rgba(127,127,127,.08); }
+        .fieldLangLibName { font-weight: 600; }
+        .fieldLangCount { opacity: .6; font-size: .9em; }
+        .fieldLangBody { padding: .3em 0 1.2em 1.2em; }
+        .fieldLangType {
+            margin: .9em 0 .35em; opacity: .65;
+            font-size: .85em; text-transform: uppercase; letter-spacing: .05em;
+        }
+        .fieldLangRow { display: flex; align-items: center; gap: 1em; margin-bottom: .4em; }
+        .fieldLangLabel { min-width: 8em; margin: 0; }
+        .fieldLangInput { max-width: 9em; }
+        .fieldLangNote { opacity: .55; font-size: .85em; }
+    </style>
     <div data-role="content">
         <div class="content-primary">
             <form id="FieldLangConfigForm">
@@ -74,9 +93,17 @@
         (function () {
             var pluginId = '6b2f4a3c-9d51-4f27-8a6e-1c0d7b5e93a4';
 
-            function buildRules(container, schema, config) {
-                container.innerHTML = '';
+            function esc(s) {
+                return String(s === null || s === undefined ? '' : s)
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            }
 
+            // Built as an HTML string rather than createElement on purpose: assigning innerHTML
+            // lets the parser upgrade customized built-ins like is="emby-input". Elements made
+            // with document.createElement('input') + setAttribute('is', ...) are never upgraded,
+            // so they would render as unstyled inputs.
+            function buildRules(container, schema, config) {
                 // Index saved rules for quick lookup: libraryId -> itemType -> field -> language
                 var saved = {};
                 (config.Libraries || []).forEach(function (lib) {
@@ -87,68 +114,77 @@
                     });
                 });
 
+                var html = '';
+
                 schema.Libraries.forEach(function (lib) {
-                    var section = document.createElement('div');
-                    section.className = 'verticalSection';
+                    var types = schema.ItemTypes.filter(function (t) {
+                        return typeAppliesTo(lib.CollectionType, t.Name);
+                    });
 
-                    var heading = document.createElement('h3');
-                    heading.className = 'sectionTitle';
-                    heading.textContent = lib.Name;
-                    section.appendChild(heading);
+                    if (!types.length) {
+                        return;
+                    }
 
-                    var any = false;
+                    var setCount = 0;
+                    var body = '';
 
-                    schema.ItemTypes.forEach(function (type) {
-                        // Only offer item types that can actually appear in this library.
-                        if (!typeAppliesTo(lib.CollectionType, type.Name)) {
-                            return;
-                        }
-
-                        any = true;
-
-                        var typeLabel = document.createElement('div');
-                        typeLabel.style.cssText = 'margin:0.6em 0 0.2em;opacity:0.75;font-weight:600;';
-                        typeLabel.textContent = type.Name;
-                        section.appendChild(typeLabel);
+                    types.forEach(function (type) {
+                        body += '<div class="fieldLangType">' + esc(type.Name) + '</div>';
 
                         type.Fields.forEach(function (field) {
-                            var wrap = document.createElement('div');
-                            wrap.className = 'inputContainer';
-                            wrap.style.cssText = 'display:flex;align-items:center;gap:1em;margin-bottom:0.4em;';
-
-                            var label = document.createElement('label');
-                            label.className = 'inputLabel';
-                            label.style.cssText = 'min-width:9em;margin:0;';
-                            label.textContent = field.Label;
-
-                            var input = document.createElement('input');
-                            input.setAttribute('is', 'emby-input');
-                            input.type = 'text';
-                            input.style.maxWidth = '10em';
-                            input.placeholder = 'default';
-                            input.setAttribute('data-library', lib.Id);
-                            input.setAttribute('data-library-name', lib.Name);
-                            input.setAttribute('data-type', type.Name);
-                            input.setAttribute('data-field', field.Name);
-                            input.value = (saved[lib.Id] && saved[lib.Id][type.Name] && saved[lib.Id][type.Name][field.Name]) || '';
-
-                            wrap.appendChild(label);
-                            wrap.appendChild(input);
-
-                            if (!field.Lockable) {
-                                var note = document.createElement('span');
-                                note.className = 'fieldDescription';
-                                note.style.margin = '0';
-                                note.textContent = 'cannot be locked';
-                                wrap.appendChild(note);
+                            var val = (saved[lib.Id] && saved[lib.Id][type.Name]
+                                && saved[lib.Id][type.Name][field.Name]) || '';
+                            if (val) {
+                                setCount++;
                             }
 
-                            section.appendChild(wrap);
+                            body += '<div class="fieldLangRow">'
+                                + '<label class="fieldLangLabel">' + esc(field.Label) + '</label>'
+                                + '<input is="emby-input" type="text" class="fieldLangInput"'
+                                + ' placeholder="default"'
+                                + ' data-library="' + esc(lib.Id) + '"'
+                                + ' data-library-name="' + esc(lib.Name) + '"'
+                                + ' data-type="' + esc(type.Name) + '"'
+                                + ' data-field="' + esc(field.Name) + '"'
+                                + ' value="' + esc(val) + '" />'
+                                + (field.Lockable ? '' : '<span class="fieldLangNote">cannot be locked</span>')
+                                + '</div>';
                         });
                     });
 
-                    if (any) {
-                        container.appendChild(section);
+                    // Open the ones that already do something; leave the rest collapsed so the
+                    // page reads as a short list of libraries instead of a wall of inputs.
+                    html += '<details class="fieldLangLib"' + (setCount ? ' open' : '') + '>'
+                        + '<summary class="fieldLangSummary">'
+                        + '<span class="fieldLangLibName">' + esc(lib.Name) + '</span>'
+                        + '<span class="fieldLangCount" data-count-for="' + esc(lib.Id) + '">'
+                        + (setCount ? setCount + (setCount === 1 ? ' rule' : ' rules') : 'no rules')
+                        + '</span>'
+                        + '</summary>'
+                        + '<div class="fieldLangBody">' + body + '</div>'
+                        + '</details>';
+                });
+
+                container.innerHTML = html;
+
+                // Keep each header's badge honest as the user types.
+                container.addEventListener('input', function (e) {
+                    var input = e.target;
+                    if (!input || !input.getAttribute || !input.getAttribute('data-field')) {
+                        return;
+                    }
+
+                    var libId = input.getAttribute('data-library');
+                    var n = 0;
+                    container.querySelectorAll('input[data-library="' + libId + '"]').forEach(function (i) {
+                        if (i.value.trim()) {
+                            n++;
+                        }
+                    });
+
+                    var badge = container.querySelector('[data-count-for="' + libId + '"]');
+                    if (badge) {
+                        badge.textContent = n ? n + (n === 1 ? ' rule' : ' rules') : 'no rules';
                     }
                 });
             }

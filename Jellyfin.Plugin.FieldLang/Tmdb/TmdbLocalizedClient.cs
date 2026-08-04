@@ -29,18 +29,6 @@ public sealed class LocalizedFields
 
     /// <summary>Gets or sets the localized genre names.</summary>
     public string[]? Genres { get; set; }
-
-    /// <summary>Reads one catalog field by name.</summary>
-    /// <param name="field">Field name from <see cref="FieldCatalog"/>.</param>
-    /// <returns>The value, or null when TMDb had nothing.</returns>
-    public object? Get(string field) => field switch
-    {
-        "Name" => Name,
-        "Overview" => Overview,
-        "Tagline" => Tagline,
-        "Genres" => Genres,
-        _ => null,
-    };
 }
 
 /// <summary>

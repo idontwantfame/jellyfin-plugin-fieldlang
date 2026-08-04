@@ -36,9 +36,9 @@ public sealed class FieldLangApplier
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>True when the item was modified and written back.</returns>
     /// <remarks>
-    /// Returning false when nothing changed is what stops the ItemUpdated feedback loop: saving
-    /// raises the event again, the second pass finds every value already correct, writes nothing,
-    /// and the chain ends. No suppression set or re-entrancy flag is needed.
+    /// Writing only on a real difference keeps repeat sweeps cheap: a second run over an
+    /// already-correct library issues no database writes at all, so the task is safe to schedule
+    /// frequently and safe to re-run by hand.
     /// </remarks>
     public async Task<bool> ApplyAsync(BaseItem item, CancellationToken cancellationToken)
     {

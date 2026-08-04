@@ -52,7 +52,21 @@ public class ApplyFieldLanguagesTask : IScheduledTask
     public string Category => "Field Language";
 
     /// <inheritdoc />
-    public IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => Array.Empty<TaskTriggerInfo>();
+    /// <remarks>
+    /// This task is the plugin's only mechanism, so it has to carry a real default trigger --
+    /// with none, a fresh install would sit there doing nothing until someone pressed play by hand.
+    /// Daily is the compromise: newly added items keep the core provider's language until the next
+    /// run, which is the tradeoff for not hooking every library update. Add more triggers in
+    /// Dashboard -> Scheduled Tasks if you want it tighter.
+    /// </remarks>
+    public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
+    {
+        yield return new TaskTriggerInfo
+        {
+            Type = TaskTriggerInfoType.IntervalTrigger,
+            IntervalTicks = TimeSpan.FromHours(24).Ticks,
+        };
+    }
 
     /// <inheritdoc />
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)

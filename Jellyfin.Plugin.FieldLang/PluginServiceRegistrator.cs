@@ -13,9 +13,8 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     /// <inheritdoc />
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
-        // Singleton so the TMDb response cache is shared between the event hook and the sweep task.
+        // Singleton so the TMDb response cache survives between scheduled-task runs.
         serviceCollection.AddSingleton<TmdbLocalizedClient>();
         serviceCollection.AddSingleton<FieldLangApplier>();
-        serviceCollection.AddHostedService<FieldLangHostedService>();
     }
 }

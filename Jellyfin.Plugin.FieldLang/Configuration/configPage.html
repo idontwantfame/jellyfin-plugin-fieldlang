@@ -4,8 +4,12 @@
     <title>Field Language</title>
 </head>
 <body>
-<div id="FieldLangConfigPage" data-role="page" class="page type-interior pluginConfigurationPage"
-     data-controller="__plugin/FieldLang/configPage.js">
+<!-- No data-controller here on purpose. That attribute makes Jellyfin's view manager load a
+     separate JS module and drive the page lifecycle from it; pointing it at a file the plugin
+     does not ship means the controller 404s and the inline script below never gets its pageshow.
+     Either ship a controller .js as its own embedded resource, or use an inline script and omit
+     the attribute -- not one with the other. -->
+<div id="FieldLangConfigPage" data-role="page" class="page type-interior pluginConfigurationPage">
     <div data-role="content">
         <div class="content-primary">
             <form id="FieldLangConfigForm">
@@ -39,15 +43,11 @@
                     </div>
                 </div>
 
-                <div class="checkboxContainer checkboxContainer-withDescription">
-                    <label class="emby-checkbox-label">
-                        <input is="emby-checkbox" type="checkbox" id="chkApplyOnUpdate" />
-                        <span>Apply as items change</span>
-                    </label>
-                    <div class="fieldDescription checkboxFieldDescription">
-                        Applies rules immediately when an item is added or refreshed. With this off,
-                        only the scheduled task applies them.
-                    </div>
+                <div class="fieldDescription" style="margin-top:1em;">
+                    Rules are applied by the <strong>Apply per-field metadata languages</strong> scheduled
+                    task, which runs daily by default. Run it from
+                    Dashboard &rarr; Scheduled Tasks to apply changes immediately, or add triggers there
+                    to run it more often.
                 </div>
 
                 <br />
@@ -213,7 +213,6 @@
 
                     page.querySelector('#txtTmdbApiKey').value = config.TmdbApiKey || '';
                     page.querySelector('#chkLockFields').checked = config.LockAppliedFields !== false;
-                    page.querySelector('#chkApplyOnUpdate').checked = config.ApplyOnItemUpdate !== false;
 
                     buildRules(page.querySelector('#FieldLangRules'), schema, config);
                     Dashboard.hideLoadingMsg();
@@ -236,7 +235,6 @@
                 ApiClient.getPluginConfiguration(pluginId).then(function (config) {
                     config.TmdbApiKey = page.querySelector('#txtTmdbApiKey').value.trim();
                     config.LockAppliedFields = page.querySelector('#chkLockFields').checked;
-                    config.ApplyOnItemUpdate = page.querySelector('#chkApplyOnUpdate').checked;
                     config.Libraries = collectRules(page.querySelector('#FieldLangRules'));
 
                     ApiClient.updatePluginConfiguration(pluginId, config).then(function (result) {

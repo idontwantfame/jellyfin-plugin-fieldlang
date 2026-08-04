@@ -55,15 +55,20 @@ manual full refresh. On the scheduled refreshes that do most of the work, `repla
 the override does nothing at all. You would test it by hand, see it work, and never notice it had
 stopped.
 
-So instead the plugin reacts to `ILibraryManager.ItemAdded` / `ItemUpdated`, after the refresh has
-settled. Provider ordering stops mattering entirely. A scheduled task (**Apply per-field metadata
-languages**) sweeps the library for the initial application and for repair after bulk operations.
+So instead everything runs from a scheduled task, **Apply per-field metadata languages**, which
+sweeps the configured libraries and rewrites the mapped fields after the normal providers are done.
+Provider ordering stops mattering entirely.
+
+The task is registered with a **daily** default trigger. Run it by hand from Dashboard → Scheduled
+Tasks to apply a config change immediately, or add triggers there to run it more often. The tradeoff
+of not hooking library events is that a newly added item keeps the core provider's language until
+the next run.
 
 ### Two details worth knowing
 
-**The feedback loop terminates on its own.** Saving an item raises `ItemUpdated` again. The applier
-writes only when a value actually differs, so the second pass finds everything already correct,
-writes nothing, and the chain ends. No suppression set or re-entrancy flag is needed.
+**Repeat runs are free.** The applier writes only when a value actually differs, so a second sweep
+over an already-correct library issues no database writes at all. The task is safe to schedule
+aggressively and safe to re-run by hand.
 
 **Empty is never written.** TMDb answers a request for a language it lacks with the field present
 but empty. Blanking a populated description is worse than leaving the wrong language in place, so

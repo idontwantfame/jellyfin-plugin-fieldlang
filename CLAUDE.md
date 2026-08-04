@@ -31,16 +31,24 @@ So a provider ordered after TMDb overwrites a *populated* field only when `repla
 i.e. only on a **manual full refresh**. On scheduled/automatic refreshes it silently does nothing.
 You would test by hand, see it work, and never notice it had stopped working overnight.
 
-Instead: **`IHostedService` hooking `ILibraryManager.ItemAdded` / `ItemUpdated`**, applied after the
-refresh settles. Provider ordering becomes irrelevant. Plus an `IScheduledTask`
-(`FieldLangApplyTask`, category "Field Language") for initial application and bulk repair.
+Instead: everything runs from an **`IScheduledTask`** (`FieldLangApplyTask`, category
+"Field Language"), which sweeps after the normal providers are done. Provider ordering becomes
+irrelevant.
+
+An `ItemAdded`/`ItemUpdated` hosted-service hook was built first and **deliberately removed on
+2026-08-04** at the user's request — the scheduled task alone was judged enough, and dropping the
+hook removes a whole class of re-entrancy and threading failure. If it is ever reinstated, the
+loop-breaker was idempotency (saving re-raises the event; pass 2 finds nothing to change and stops),
+not a suppression set.
 
 ## Load-bearing details
 
-- **The `ItemUpdated` feedback loop terminates by itself.** Saving raises the event again;
-  `FieldLangApplier.ApplyAsync` writes only when a value actually differs, so pass 2 changes
-  nothing, saves nothing, and the chain stops. Do **not** add a suppression set — idempotency is
-  the mechanism. If you ever make a write non-deterministic, this breaks into an infinite loop.
+- **The task carries a daily default trigger.** It is the only mechanism, so `GetDefaultTriggers()`
+  must return something — with an empty list a fresh install silently does nothing until someone
+  presses play by hand. Consequence: a newly added item keeps the core provider's language until
+  the next run.
+- **Repeat sweeps are free.** `FieldLangApplier.ApplyAsync` writes only on a real difference, so a
+  second run over a correct library issues zero DB writes.
 - **Never blank a field.** TMDb returns the key present-but-empty for a language it lacks.
   `LocalizedFields` properties are nullable and null means "don't touch". Removing that guard would
   wipe descriptions for every item TMDb has no localized data for.
@@ -58,8 +66,8 @@ refresh settles. Provider ordering becomes irrelevant. Plus an `IScheduledTask`
 ## Config model
 
 `PluginConfiguration` → `Libraries[]` (`LibraryRuleSet`) → `Rules[]` (`FieldLanguageRule`:
-ItemType + Field + Language). Empty language = leave the field alone. Global toggles:
-`TmdbApiKey`, `LockAppliedFields` (default true), `ApplyOnItemUpdate` (default true).
+ItemType + Field + Language). Empty language = leave the field alone. Global settings:
+`TmdbApiKey`, `LockAppliedFields` (default true).
 
 **The config page is generic** — it renders from `GET /FieldLang/Schema` (libraries × field
 catalog), so adding a field means editing `FieldCatalog` + the TMDb mapper only. No HTML edit.
@@ -77,6 +85,15 @@ docker restart jellyfin
 
 The config page is an **embedded resource** — editing `configPage.html` requires a rebuild, not just
 a file copy.
+
+⚠️ **Never put `data-controller` on the page div unless you actually ship that JS file.** It makes
+Jellyfin's view manager load a separate module and drive the lifecycle from it; pointing it at a
+non-existent path means the controller 404s and the inline `<script>` never receives `pageshow` —
+the page renders its static HTML but the Rules section stays empty and no config loads. Cost an
+hour on 2026-08-04. Debug trick that found it: extract the inline script into a standalone harness
+with stubbed `ApiClient`/`Dashboard` plus the real `/FieldLang/Schema` JSON, run it under
+`google-chrome --headless --dump-dom --virtual-time-budget=6000`, and print child counts + captured
+`window.onerror` into the DOM. That proved the JS was correct and moved the search to the loader.
 
 Verify after restart:
 

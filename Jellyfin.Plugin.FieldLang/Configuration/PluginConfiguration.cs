@@ -62,12 +62,6 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </remarks>
     public bool LockAppliedFields { get; set; } = true;
 
-    /// <summary>
-    /// Gets or sets a value indicating whether the plugin reacts to library item updates in real time.
-    /// When false, only the scheduled task applies rules.
-    /// </summary>
-    public bool ApplyOnItemUpdate { get; set; } = true;
-
     /// <summary>Gets or sets the per-library rule sets.</summary>
     public List<LibraryRuleSet> Libraries { get; set; } = new();
 }

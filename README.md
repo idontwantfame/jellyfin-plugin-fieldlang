@@ -1,106 +1,94 @@
 # Field Language
 
-A Jellyfin plugin that pulls **individual metadata fields in different languages**.
+Jellyfin plugin that pulls individual metadata fields in different languages.
 
-Jellyfin's metadata language is a single per-library setting: everything comes back in one language,
-or nothing does. This plugin lets you say *titles in English, descriptions in Turkish, genres in
-German* — configured per library and per item type.
+Jellyfin's metadata language is one setting per library: everything comes back in one language or
+nothing does. This lets you keep titles in English while descriptions come in Turkish, or any other
+combination, set per library and per item type.
 
-This has been requested upstream for years without an implementation:
-
-- [jellyfin#10076 — Separate Language Settings for Titles and Posters](https://github.com/jellyfin/jellyfin/issues/10076)
-- [jellyfin-web#332 — Metadata language priority](https://github.com/jellyfin/jellyfin-web/issues/332)
-- [jellyfin#16400 — Allow metadata language override on manual refresh](https://github.com/jellyfin/jellyfin/issues/16400)
-- [features.jellyfin.org#610 — Metadata in multiple languages](https://features.jellyfin.org/posts/610/metadata-in-multiple-languages)
-
-The existing [Polyglot](https://github.com/Maronato/jellyfin-plugin-polyglot) plugin solves an
-adjacent but different problem — whole-library mirrors via hardlinks, one library per language.
-This one operates at field granularity inside a single library.
-
-## Supported fields
+## Fields
 
 | Item type | Fields |
 |---|---|
-| Movie | Title, Description, Tagline, Genres |
-| Series | Title, Description, Tagline, Genres |
-| Season | Title, Description |
-| Episode | Title, Description |
+| Movie, Series | Title, Description, Tagline, Genres |
+| Season, Episode | Title, Description |
 
-The list is deliberately limited to what TMDb actually returns per-language. Season and episode
-payloads carry only name and overview, so offering a Tagline control there would render something
-that could never do anything.
+Limited to what TMDb returns per language. Season and episode payloads only carry name and overview.
 
-Adding a field means one entry in `FieldCatalog` plus one line in the TMDb mapper — the config page
-renders itself from the catalog via `GET /FieldLang/Schema`, so the UI needs no edit.
+If TMDb has no data for a field in the language you asked for, the existing value is kept rather
+than blanked.
 
 ## Requirements
 
-- Jellyfin **10.11.x**
-- A **TMDb API key** (free, v3). The server's built-in key is compiled into the core assembly and is
-  not reachable from a plugin, so this one needs its own.
+- Jellyfin 10.11.x
+- A TMDb API key (free, v3). Jellyfin's own key is compiled into the server assembly and can't be
+  reached from a plugin.
 
-## How it works, and why it isn't a metadata provider
+## Install
 
-The obvious design — register an `IRemoteMetadataProvider` that runs after TMDb and overwrites
-specific fields — **silently fails on half of all refreshes**. In `MetadataService.ExecuteRemoteProviders`:
+Download the release, drop `Jellyfin.Plugin.FieldLang.dll` and `meta.json` into
+`<config>/plugins/Field Language_1.0.0.0/`, restart the server.
 
-```csharp
-MergeData(result, temp, [], replaceData, false);
-// and inside MergeBaseItemData:
-if (replaceData || target.Genres.Length == 0) { target.Genres = source.Genres; }
-```
+Then in Dashboard → Plugins → Field Language: paste your TMDb key, expand a library, put a language
+code next to the fields you want, save.
 
-A later provider overwrites a populated field only when `replaceData` is true — that is, only on a
-manual full refresh. On the scheduled refreshes that do most of the work, `replaceData` is false and
-the override does nothing at all. You would test it by hand, see it work, and never notice it had
-stopped.
-
-So instead everything runs from a scheduled task, **Apply per-field metadata languages**, which
-sweeps the configured libraries and rewrites the mapped fields after the normal providers are done.
-Provider ordering stops mattering entirely.
-
-The task is registered with a **daily** default trigger. Run it by hand from Dashboard → Scheduled
-Tasks to apply a config change immediately, or add triggers there to run it more often. The tradeoff
-of not hooking library events is that a newly added item keeps the core provider's language until
-the next run.
-
-### Two details worth knowing
-
-**Repeat runs are free.** The applier writes only when a value actually differs, so a second sweep
-over an already-correct library issues no database writes at all. The task is safe to schedule
-aggressively and safe to re-run by hand.
-
-**Empty is never written.** TMDb answers a request for a language it lacks with the field present
-but empty. Blanking a populated description is worse than leaving the wrong language in place, so
-a null/empty localized value means "keep what the core provider wrote".
+Rules are applied by the **Apply per-field metadata languages** scheduled task, which runs daily.
+Run it from Dashboard → Scheduled Tasks to apply a change immediately.
 
 ## Locking
 
-Each rule carries its own **lock** toggle, on by default. Locking adds that field to the item's
-`LockedFields`, so the normal provider stops overwriting it. Unlocked, the provider rewrites the
-field on every refresh and the next task run puts it back — still correct, but the wrong language is
-visible in between.
+Each rule has a lock toggle, on by default. Locking pins the field so Jellyfin's normal metadata
+provider stops overwriting it. Unlocked, the provider rewrites it on every refresh and the next task
+run puts it back, so the wrong language shows in between.
 
-Per-rule rather than global because the right answer differs by field: you may want a pinned
-description while genres keep tracking whatever TMDb publishes.
+Unticking a lock removes it, so you can always release one from the config page.
 
-Unticking a lock actively **removes** it, so a lock set by an earlier run can always be released
-from the config page rather than needing a manual edit on the item.
+Tagline has no lock in Jellyfin and always works the unlocked way.
 
-Tagline has no corresponding `MetadataField` in Jellyfin and therefore cannot be locked; it always
-relies on re-application, and the config page shows no checkbox for it.
+## How it works
 
-## Building
+Everything runs from the scheduled task, which rewrites the mapped fields after the normal providers
+have finished.
 
-No local .NET SDK required:
+It is deliberately not an `IRemoteMetadataProvider`. That's the obvious design and it doesn't work.
+`MetadataService.ExecuteRemoteProviders` merges with:
+
+```csharp
+if (replaceData || target.Genres.Length == 0) { target.Genres = source.Genres; }
+```
+
+A provider ordered after TMDb only overwrites a populated field when `replaceData` is true, which
+means manual full refreshes only. On the scheduled refreshes that do most of the work it does
+nothing at all. Running separately avoids provider ordering entirely.
+
+The task only writes when a value actually differs, so re-running it over a correct library costs no
+database writes.
+
+## Adding a field
+
+One entry in `FieldCatalog`, which carries the field's id, label, lock field and how to copy the
+value onto an item. The config page renders itself from that catalog over `GET /FieldLang/Schema`,
+so there's no UI to update.
+
+## Build
 
 ```bash
 docker run --rm -v "$PWD":/src -w /src mcr.microsoft.com/dotnet/sdk:9.0 \
   dotnet build Jellyfin.Plugin.FieldLang/Jellyfin.Plugin.FieldLang.csproj -c Release
 ```
 
-Then copy `bin/Release/net9.0/Jellyfin.Plugin.FieldLang.dll` alongside a `meta.json` into
-`<jellyfin-config>/plugins/Field Language_1.0.0.0/` and restart the server.
+Output lands in `Jellyfin.Plugin.FieldLang/bin/Release/net9.0/`.
+
+## Prior art
+
+[Polyglot](https://github.com/Maronato/jellyfin-plugin-polyglot) solves a related problem a
+different way: whole mirrored libraries, one per language, via hardlinks. This plugin works at field
+level inside a single library.
+
+Long-standing upstream requests for the same thing:
+[#10076](https://github.com/jellyfin/jellyfin/issues/10076),
+[jellyfin-web#332](https://github.com/jellyfin/jellyfin-web/issues/332),
+[#16400](https://github.com/jellyfin/jellyfin/issues/16400).
 
 ## License
 

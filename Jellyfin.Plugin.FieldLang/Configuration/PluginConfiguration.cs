@@ -14,20 +14,18 @@ public class FieldLanguageRule
     public string Field { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the ISO 639-1 language to pull this field in, optionally region-qualified (for example "pt-BR").
-    /// Empty means "leave alone" -- the plugin will not touch the field at all.
+    /// Gets or sets the language, ISO 639-1 and optionally region-qualified ("pt-BR").
+    /// Empty leaves the field alone.
     /// </summary>
     public string Language { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets a value indicating whether this field is pinned against future provider writes.
+    /// Gets or sets a value indicating whether this field is pinned against provider writes.
+    /// Ignored for fields Jellyfin cannot lock, such as Tagline.
     /// </summary>
     /// <remarks>
-    /// Defaults to true, which is also what a configuration saved before this setting existed
-    /// deserializes to -- XmlSerializer leaves an absent element at its initialized value, so
-    /// upgrading does not silently turn locking off.
-    /// Ignored for fields with no corresponding <see cref="MediaBrowser.Model.Entities.MetadataField"/>
-    /// (Tagline), which Jellyfin cannot lock at all.
+    /// Defaults to true, which is also what configs written before this field existed deserialize
+    /// to, since XmlSerializer leaves an absent element at its initialized value.
     /// </remarks>
     public bool Lock { get; set; } = true;
 }
@@ -37,14 +35,12 @@ public class FieldLanguageRule
 /// </summary>
 public class LibraryRuleSet
 {
-    /// <summary>
-    /// Gets or sets the library (virtual folder) item id these rules apply to.
-    /// </summary>
+    /// <summary>Gets or sets the virtual folder id these rules apply to.</summary>
     public string LibraryId { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the library name at the time the rule was saved. Display only -- matching is by id,
-    /// so renaming a library in Jellyfin does not break the rule.
+    /// Gets or sets the library name, for display only. Matching is by id, so renaming a library
+    /// does not break its rules.
     /// </summary>
     public string LibraryName { get; set; } = string.Empty;
 

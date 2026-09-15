@@ -20,7 +20,7 @@ than blanked.
 
 ## Requirements
 
-- Jellyfin 10.11.x
+- Jellyfin 12.x (plugin 2.x) or Jellyfin 10.11.x (plugin 1.x)
 - A TMDb API key (free, v3). Jellyfin's own key is compiled into the server assembly and can't be
   reached from a plugin.
 
@@ -35,7 +35,7 @@ https://raw.githubusercontent.com/rbcetin/jellyfin-plugin-fieldlang/main/manifes
 Then install Field Language from the catalogue and restart.
 
 Or do it by hand: unzip the [release](https://github.com/rbcetin/jellyfin-plugin-fieldlang/releases)
-into `<config>/plugins/Field Language_1.0.0.0/` and restart.
+into `<config>/plugins/Field Language_<version>/` and restart.
 
 Either way, finish in Dashboard → Plugins → Field Language: paste your TMDb key, expand a library,
 put a language code next to the fields you want, save.
@@ -81,11 +81,11 @@ so there's no UI to update.
 ## Build
 
 ```bash
-docker run --rm -v "$PWD":/src -w /src mcr.microsoft.com/dotnet/sdk:9.0 \
+docker run --rm -v "$PWD":/src -w /src mcr.microsoft.com/dotnet/sdk:10.0 \
   dotnet build Jellyfin.Plugin.FieldLang/Jellyfin.Plugin.FieldLang.csproj -c Release
 ```
 
-Output lands in `Jellyfin.Plugin.FieldLang/bin/Release/net9.0/`.
+Output lands in `Jellyfin.Plugin.FieldLang/bin/Release/net10.0/`.
 
 ## Prior art
 

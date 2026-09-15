@@ -9,6 +9,14 @@
     "imageUrl": "",
     "versions": [
       {
+        "version": "2.0.0.0",
+        "changelog": "Jellyfin 12 support (net10.0, ABI 12.0.0.0). No functional changes. Jellyfin 10.11 stays on 1.0.0.0.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/rbcetin/jellyfin-plugin-fieldlang/releases/download/v2.0.0.0/field-language_2.0.0.0.zip",
+        "checksum": "c20df8312b3e7c520bc3d1014c6e26cb",
+        "timestamp": "2026-09-15T00:00:00Z"
+      },
+      {
         "version": "1.0.0.0",
         "changelog": "First release.",
         "targetAbi": "10.11.0.0",

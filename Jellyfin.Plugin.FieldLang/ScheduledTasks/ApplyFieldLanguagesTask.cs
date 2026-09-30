@@ -131,7 +131,7 @@ public class ApplyFieldLanguagesTask : IScheduledTask
                     updated++;
                 }
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
@@ -144,6 +144,7 @@ public class ApplyFieldLanguagesTask : IScheduledTask
             progress.Report(processed * 100.0 / items.Count);
         }
 
+        progress.Report(100);
         _logger.LogInformation("FieldLang: sweep complete, {Updated} of {Total} items updated", updated, items.Count);
     }
 }

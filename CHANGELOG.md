@@ -13,6 +13,8 @@
 - Keep server-owned backups and approvals across unrelated or stale dashboard configuration saves;
   revoke sample approvals when their original-title rules are removed.
 - Skip transient TMDb timeouts per item without aborting the sweep; retain actual user cancellation.
+- Keep sweeps running after repository-level timeouts unrelated to task cancellation, retain
+  recovery journals for retry, and report completion for empty libraries.
 - Finish remote lookups before editing shared metadata, respect full item locks added during
   lookups, and preserve unrelated field locks added while waiting for TMDb.
 - Keep interrupted rollback recoverable when an original-title rule is reenabled and reapproved;

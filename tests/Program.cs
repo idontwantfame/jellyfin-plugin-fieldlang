@@ -311,6 +311,28 @@ var progress = new RecordedProgress();
 await sweep.ExecuteAsync(progress, default);
 Check(timedOutItem.Writes == 0 && afterTimeout.Writes == 1 && progress.Last == 100,
     "A TMDb timeout must not stop the scheduled task from applying later items");
+
+items.Clear();
+var emptyProgress = new RecordedProgress();
+await sweep.ExecuteAsync(emptyProgress, default);
+Check(emptyProgress.Last == 100, "An empty library sweep must report completion");
+
+var repositoryTimeout = new TestMovie { Id = Guid.NewGuid(), Name = "Before repository timeout", OriginalTitle = "After repository timeout", CancelNextWrite = true };
+var afterRepositoryTimeout = new TestMovie { Id = Guid.NewGuid(), Name = "Next translation", OriginalTitle = "Next original" };
+items.Add(repositoryTimeout);
+items.Add(afterRepositoryTimeout);
+await sweep.ExecuteAsync(progress, default);
+Check(repositoryTimeout.Writes == 0 && afterRepositoryTimeout.Writes == 1 && progress.Last == 100,
+    "Repository cancellation without task cancellation must skip only the failing item");
+Check(config.OriginalTitleBackups.Single(b => b.ItemId == repositoryTimeout.Id.ToString("N")).PendingWrite,
+    "A repository timeout must retain the pending recovery record");
+await sweep.ExecuteAsync(progress, default);
+Check(repositoryTimeout.Writes == 1 && afterRepositoryTimeout.Writes == 1,
+    "The next sweep must recover the timed-out write without rewriting successful items");
+var sweepCancelled = false;
+try { await sweep.ExecuteAsync(progress, cancelled.Token); }
+catch (OperationCanceledException) { sweepCancelled = true; }
+Check(sweepCancelled, "Actual scheduled-task cancellation must still propagate");
 Check(typeof(Plugin).Assembly.GetName().Version == new Version(2, 1, 0, 0), "New release assembly must report version 2.1.0.0");
 
 // Remote lookups may overlap a dashboard metadata lock. Stage responses before any item edits.
@@ -413,8 +435,10 @@ public class TestMovie : Movie
 {
     public int Writes { get; private set; }
     public bool FailNextWrite { get; set; }
+    public bool CancelNextWrite { get; set; }
     public override Task UpdateToRepositoryAsync(ItemUpdateType updateReason, CancellationToken cancellationToken)
     {
+        if (CancelNextWrite) { CancelNextWrite = false; throw new TaskCanceledException("Simulated repository timeout"); }
         if (FailNextWrite) { FailNextWrite = false; throw new IOException("Simulated repository failure"); }
         Writes++;
         return Task.CompletedTask;

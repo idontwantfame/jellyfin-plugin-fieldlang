@@ -70,6 +70,15 @@
                     overwriting it. Unlocked, the provider rewrites it on every refresh and this plugin
                     puts it back on the next run &mdash; still correct, but the wrong language is visible
                     in between. Tagline has no lock in Jellyfin, so it always works the second way.
+                    <br /><br />
+                    <strong>Original title</strong> is different: enable its checkbox instead of entering a
+                    language. For each movie or series Field Language uses Jellyfin's populated
+                    OriginalTitle, falling back to TMDb's original title/name. It changes the server
+                    title seen by all clients, preserves an explicit sort title, and stops managing an
+                    item if it later detects a manual title edit.
+                    It replaces the fixed-language Title rule and always locks the title. Existing
+                    manual title locks are skipped. Saving this rule does not authorize any changes;
+                    review a dry-run and approve samples or libraries below.
                 </div>
 
                 <div id="FieldLangRules"></div>
@@ -80,12 +89,43 @@
                     </button>
                 </div>
             </form>
+
+            <div style="margin-top:2em;">
+                <h3>Original-title safety tools</h3>
+                <div class="fieldDescription">
+                    Save the rule first, then run a dry-run before the scheduled task. It makes no
+                    metadata changes and lists the current server title, proposed title, and source.
+                    Rollback restores only titles still owned by Field Language; later manual edits are skipped.
+                </div>
+                <button is="emby-button" type="button" id="btnOriginalTitleDryRun" class="raised emby-button">
+                    <span>Dry-run original titles</span>
+                </button>
+                <button is="emby-button" type="button" id="btnOriginalTitleRollback" class="emby-button">
+                    <span>Rollback original titles</span>
+                </button>
+                <button is="emby-button" type="button" id="btnOriginalTitleSamples" class="emby-button" disabled>
+                    <span>Apply selected samples</span>
+                </button>
+                <button is="emby-button" type="button" id="btnOriginalTitleApprove" class="emby-button" disabled>
+                    <span>Approve reviewed libraries and future imports</span>
+                </button>
+                <div id="OriginalTitleSampleChoices"></div>
+                <pre id="OriginalTitleDryRunResults" class="fieldLangNote" style="white-space:pre-wrap; max-height:24em; overflow:auto;"></pre>
+            </div>
         </div>
     </div>
 
     <script type="text/javascript">
         (function () {
             var pluginId = '6b2f4a3c-9d51-4f27-8a6e-1c0d7b5e93a4';
+            var reviewToken = null;
+
+            function invalidateReview() {
+                reviewToken = null;
+                document.querySelector('#btnOriginalTitleSamples').disabled = true;
+                document.querySelector('#btnOriginalTitleApprove').disabled = true;
+                document.querySelector('#OriginalTitleSampleChoices').innerHTML = '';
+            }
 
             function esc(s) {
                 return String(s === null || s === undefined ? '' : s)
@@ -131,24 +171,39 @@
                             var val = rule ? rule.Language : '';
                             // New rows default to locked; that matches the server-side default.
                             var locked = rule ? rule.Lock !== false : true;
+                            var originalRule = (saved[lib.Id] && saved[lib.Id][type.Name]
+                                && saved[lib.Id][type.Name].OriginalTitle);
+                            if (field.Name === 'Name' && originalRule) {
+                                val = '';
+                            }
 
-                            if (val) {
+                            if (val || (!field.RequiresLanguage && rule)) {
                                 setCount++;
                             }
 
                             body += '<div class="fieldLangRow">'
                                 + '<label class="fieldLangLabel">' + esc(field.Label) + '</label>'
-                                + '<input is="emby-input" type="text" class="fieldLangInput"'
-                                + ' placeholder="default"'
-                                + ' data-library="' + esc(lib.Id) + '"'
-                                + ' data-library-name="' + esc(lib.Name) + '"'
-                                + ' data-type="' + esc(type.Name) + '"'
-                                + ' data-field="' + esc(field.Name) + '"'
-                                + ' value="' + esc(val) + '" />'
+                                + (field.RequiresLanguage
+                                    ? '<input is="emby-input" type="text" class="fieldLangInput"'
+                                        + ' placeholder="default"'
+                                        + ' data-library="' + esc(lib.Id) + '"'
+                                        + ' data-library-name="' + esc(lib.Name) + '"'
+                                        + ' data-type="' + esc(type.Name) + '"'
+                                        + ' data-field="' + esc(field.Name) + '"'
+                                        + (field.Name === 'Name' && originalRule ? ' disabled' : '')
+                                        + ' value="' + esc(val) + '" />'
+                                    : '<label class="fieldLangLock"><input is="emby-checkbox" type="checkbox"'
+                                        + ' class="fieldLangOriginalTitle"'
+                                        + ' data-library="' + esc(lib.Id) + '"'
+                                        + ' data-library-name="' + esc(lib.Name) + '"'
+                                        + ' data-type="' + esc(type.Name) + '"'
+                                        + ' data-field="' + esc(field.Name) + '"'
+                                        + (rule ? ' checked' : '') + ' /><span>use each item\'s original title</span></label>')
                                 + (field.Lockable
                                     ? '<label class="fieldLangLock"><input is="emby-checkbox" type="checkbox"'
                                         + ' data-lock-for="' + esc(lib.Id + '|' + type.Name + '|' + field.Name) + '"'
-                                        + (locked ? ' checked' : '') + ' /><span>lock</span></label>'
+                                        + (field.Name === 'OriginalTitle' ? ' checked disabled' : (locked ? ' checked' : ''))
+                                        + ' /><span>' + (field.Name === 'OriginalTitle' ? 'always locked' : 'lock') + '</span></label>'
                                     : '<span class="fieldLangNote">cannot be locked</span>')
                                 + '</div>';
                         });
@@ -170,16 +225,25 @@
                 container.innerHTML = html;
 
                 // Keep each header's badge honest as the user types.
-                container.addEventListener('input', function (e) {
+                container.oninput = function (e) {
+                    invalidateReview();
                     var input = e.target;
                     if (!input || !input.getAttribute || !input.getAttribute('data-field')) {
                         return;
                     }
 
                     var libId = input.getAttribute('data-library');
+                    if (input.getAttribute('data-field') === 'OriginalTitle') {
+                        var title = container.querySelector('input[data-library="' + libId
+                            + '"][data-type="' + input.getAttribute('data-type') + '"][data-field="Name"]');
+                        if (title) {
+                            title.disabled = input.checked;
+                            if (input.checked) { title.value = ''; }
+                        }
+                    }
                     var n = 0;
                     container.querySelectorAll('input[data-library="' + libId + '"]').forEach(function (i) {
-                        if (i.value.trim()) {
+                        if ((i.type === 'checkbox' && i.checked) || (i.type !== 'checkbox' && i.value.trim())) {
                             n++;
                         }
                     });
@@ -188,7 +252,7 @@
                     if (badge) {
                         badge.textContent = n ? n + (n === 1 ? ' rule' : ' rules') : 'no rules';
                     }
-                });
+                };
             }
 
             // Library kinds that hold none of the item types this plugin can localize. Rendering
@@ -215,8 +279,9 @@
                 var byLibrary = {};
 
                 container.querySelectorAll('input[data-field]').forEach(function (input) {
-                    var lang = (input.value || '').trim();
-                    if (!lang) {
+                    var originalTitle = input.classList.contains('fieldLangOriginalTitle');
+                    var lang = originalTitle ? '' : (input.value || '').trim();
+                    if (input.disabled || (!originalTitle && !lang) || (originalTitle && !input.checked)) {
                         return;
                     }
 
@@ -249,6 +314,7 @@
             }
 
             function load(page) {
+                invalidateReview();
                 Dashboard.showLoadingMsg();
 
                 Promise.all([
@@ -274,6 +340,7 @@
 
             document.querySelector('#FieldLangConfigForm').addEventListener('submit', function (e) {
                 e.preventDefault();
+                invalidateReview();
                 Dashboard.showLoadingMsg();
 
                 var page = document.querySelector('#FieldLangConfigPage');
@@ -282,12 +349,97 @@
                     config.TmdbApiKey = page.querySelector('#txtTmdbApiKey').value.trim();
                     config.Libraries = collectRules(page.querySelector('#FieldLangRules'));
 
-                    ApiClient.updatePluginConfiguration(pluginId, config).then(function (result) {
+                    return ApiClient.updatePluginConfiguration(pluginId, config).then(function (result) {
                         Dashboard.processPluginConfigurationUpdateResult(result);
                     });
+                }).catch(function () {
+                    Dashboard.hideLoadingMsg();
+                    Dashboard.alert('Failed to save Field Language configuration.');
                 });
 
                 return false;
+            });
+
+            function originalTitleRequest(path, body) {
+                return ApiClient.ajax({
+                    type: 'POST',
+                    url: ApiClient.getUrl(path),
+                    dataType: 'json',
+                    contentType: 'application/json',
+                    data: body ? JSON.stringify(body) : undefined
+                });
+            }
+
+            document.querySelector('#btnOriginalTitleDryRun').addEventListener('click', function () {
+                Dashboard.showLoadingMsg();
+                originalTitleRequest('FieldLang/OriginalTitles/DryRun').then(function (result) {
+                    reviewToken = result.Token;
+                    document.querySelector('#btnOriginalTitleSamples').disabled = false;
+                    document.querySelector('#btnOriginalTitleApprove').disabled = false;
+                    var lines = ['Dry-run: ' + result.WouldChange + ' of ' + result.Count + ' configured items would change.'];
+                    var choices = '';
+                    (result.Items || []).forEach(function (item) {
+                        lines.push((item.WouldChange ? 'CHANGE' : 'KEEP') + ': ' + item.CurrentTitle
+                            + ' → ' + (item.ProposedTitle || '(none)') + ' [' + item.Reason + ']');
+                        if (item.ProposedTitle) {
+                            choices += '<label class="fieldLangLock"><input type="checkbox" data-sample-id="'
+                                + esc(item.ItemId) + '" /><span>' + esc(item.CurrentTitle) + ' → '
+                                + esc(item.ProposedTitle) + '</span></label>';
+                        }
+                    });
+                    document.querySelector('#OriginalTitleDryRunResults').textContent = lines.join('\n');
+                    document.querySelector('#OriginalTitleSampleChoices').innerHTML = choices;
+                    Dashboard.hideLoadingMsg();
+                }).catch(function () {
+                    Dashboard.hideLoadingMsg();
+                    Dashboard.alert('Original-title dry-run failed. Check the TMDb key and server log.');
+                });
+            });
+
+            function approveOriginalTitles(libraries) {
+                if (!reviewToken) { return; }
+                var ids = [];
+                document.querySelectorAll('[data-sample-id]:checked').forEach(function (input) {
+                    ids.push(input.getAttribute('data-sample-id'));
+                });
+                if (!libraries && !ids.length) {
+                    Dashboard.alert('Select a few reviewed items first.');
+                    return;
+                }
+                if (libraries && !window.confirm('Allow the scheduled task to apply original titles to these reviewed libraries, including future imports?')) {
+                    return;
+                }
+                Dashboard.showLoadingMsg();
+                originalTitleRequest('FieldLang/OriginalTitles/Approve', {
+                    Token: reviewToken, ItemIds: ids, ApproveLibraries: libraries
+                }).then(function (result) {
+                    invalidateReview();
+                    Dashboard.hideLoadingMsg();
+                    Dashboard.alert(libraries ? 'Libraries approved. Run the scheduled task to apply titles.'
+                        : 'Updated ' + result.Updated + ' sample(s). Verify them in Jellyfin and Neptune.');
+                }).catch(function () {
+                    invalidateReview();
+                    Dashboard.hideLoadingMsg();
+                    Dashboard.alert('Approval failed or the preview expired. Run another dry-run.');
+                });
+            }
+            document.querySelector('#btnOriginalTitleSamples').addEventListener('click', function () { approveOriginalTitles(false); });
+            document.querySelector('#btnOriginalTitleApprove').addEventListener('click', function () { approveOriginalTitles(true); });
+
+            document.querySelector('#btnOriginalTitleRollback').addEventListener('click', function () {
+                if (!window.confirm('Restore every original-title change still owned by Field Language?')) {
+                    return;
+                }
+                Dashboard.showLoadingMsg();
+                originalTitleRequest('FieldLang/OriginalTitles/Rollback').then(function (result) {
+                    invalidateReview();
+                    Dashboard.hideLoadingMsg();
+                    Dashboard.alert('Restored ' + result.Restored + ' title(s); skipped ' + result.Skipped + ' protected/manual item(s).');
+                    load(document.querySelector('#FieldLangConfigPage'));
+                }).catch(function () {
+                    Dashboard.hideLoadingMsg();
+                    Dashboard.alert('Original-title rollback failed. Check the server log.');
+                });
             });
         })();
     </script>

@@ -44,6 +44,7 @@ public sealed class TmdbLocalizedClient
     // Keyed by "type:id:lang". A sweep over a whole library asks for the same series or season
     // repeatedly (once per episode), so this collapses a lot of identical requests.
     private readonly ConcurrentDictionary<string, LocalizedFields?> _cache = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string?> _originalTitleCache = new(StringComparer.Ordinal);
 
     /// <summary>Initializes a new instance of the <see cref="TmdbLocalizedClient"/> class.</summary>
     /// <param name="httpClientFactory">HTTP client factory.</param>
@@ -55,7 +56,19 @@ public sealed class TmdbLocalizedClient
     }
 
     /// <summary>Drops all cached responses.</summary>
-    public void ClearCache() => _cache.Clear();
+    public void ClearCache()
+    {
+        _cache.Clear();
+        _originalTitleCache.Clear();
+    }
+
+    /// <summary>Fetches TMDb's language-independent original title for a movie.</summary>
+    public Task<string?> GetMovieOriginalTitleAsync(string tmdbId, CancellationToken cancellationToken) =>
+        GetOriginalTitleAsync($"movie/{tmdbId}", $"movie:{tmdbId}", "original_title", cancellationToken);
+
+    /// <summary>Fetches TMDb's language-independent original name for a series.</summary>
+    public Task<string?> GetSeriesOriginalTitleAsync(string tmdbId, CancellationToken cancellationToken) =>
+        GetOriginalTitleAsync($"tv/{tmdbId}", $"tv:{tmdbId}", "original_name", cancellationToken);
 
     /// <summary>Fetches localized fields for a movie.</summary>
     /// <param name="tmdbId">TMDb movie id.</param>
@@ -157,6 +170,61 @@ public sealed class TmdbLocalizedClient
 
         _cache[key] = result;
         return result;
+    }
+
+    private async Task<string?> GetOriginalTitleAsync(
+        string path,
+        string cacheKey,
+        string property,
+        CancellationToken cancellationToken)
+    {
+        var key = "original:" + cacheKey;
+        if (_originalTitleCache.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        var apiKey = Plugin.Instance?.Configuration.TmdbApiKey;
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            _logger.LogWarning("No TMDb API key configured; cannot read original titles");
+            return null;
+        }
+
+        try
+        {
+            // Deliberately omit language: original_title/original_name is source metadata, not a
+            // translation chosen from the library's configured metadata language.
+            var url = $"{BaseUrl}/{path}?api_key={Uri.EscapeDataString(apiKey)}";
+            using var response = await _http.GetAsync(url, cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                _originalTitleCache[key] = null;
+                return null;
+            }
+
+            if (response.StatusCode == HttpStatusCode.TooManyRequests)
+            {
+                _logger.LogWarning("TMDb rate-limited the original-title request for {Path}", path);
+                return null;
+            }
+
+            response.EnsureSuccessStatusCode();
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+            var title = ReadString(doc.RootElement, property);
+            _originalTitleCache[key] = title;
+            return title;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "TMDb original-title lookup failed for {Path}", path);
+            return null;
+        }
     }
 
     private static LocalizedFields Map(JsonElement root)

@@ -15,7 +15,8 @@ public class FieldLanguageRule
 
     /// <summary>
     /// Gets or sets the language, ISO 639-1 and optionally region-qualified ("pt-BR").
-    /// Empty leaves the field alone.
+    /// Empty leaves the field alone. The OriginalTitle field does not use a language; its enabled
+    /// rule is represented by that field name with an empty language.
     /// </summary>
     public string Language { get; set; } = string.Empty;
 
@@ -28,6 +29,62 @@ public class FieldLanguageRule
     /// to, since XmlSerializer leaves an absent element at its initialized value.
     /// </remarks>
     public bool Lock { get; set; } = true;
+}
+
+/// <summary>
+/// The title that Field Language replaced for one item, retained for safe rollback and to detect
+/// a title subsequently changed by a person.
+/// </summary>
+public class OriginalTitleBackup
+{
+    /// <summary>Gets or sets the Jellyfin item id.</summary>
+    public string ItemId { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the display title before Field Language first changed it.</summary>
+    public string OriginalName { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the explicitly configured sort title before the change, if any.</summary>
+    public string? OriginalForcedSortName { get; set; }
+
+    /// <summary>Gets or sets the title most recently written by Field Language.</summary>
+    public string LastAppliedName { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets whether a later non-plugin edit was detected.</summary>
+    public bool ManualOverrideDetected { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the backup was committed before its matching Jellyfin write finished.
+    /// This makes an interrupted task recoverable instead of losing the prior title.
+    /// </summary>
+    public bool PendingWrite { get; set; }
+
+    /// <summary>Gets or sets the title immediately before a pending write.</summary>
+    public string? PendingPreviousName { get; set; }
+
+    /// <summary>Gets or sets whether Field Language added the title lock.</summary>
+    public bool AddedNameLock { get; set; }
+
+    /// <summary>Gets or sets whether lock ownership was recorded by the safe implementation.</summary>
+    public bool LockOwnershipRecorded { get; set; }
+
+    /// <summary>Gets or sets the provider identity used when the backup was created.</summary>
+    public string? TmdbId { get; set; }
+
+    /// <summary>Gets or sets whether a journaled rollback needs to finish after interruption.</summary>
+    public bool PendingRollback { get; set; }
+}
+
+/// <summary>An individually reviewed title, approved through a dry-run.</summary>
+public class OriginalTitleApproval
+{
+    /// <summary>Gets or sets the item id.</summary>
+    public string ItemId { get; set; } = string.Empty;
+    /// <summary>Gets or sets the reviewed display title.</summary>
+    public string CurrentTitle { get; set; } = string.Empty;
+    /// <summary>Gets or sets the reviewed original title.</summary>
+    public string ProposedTitle { get; set; } = string.Empty;
+    /// <summary>Gets or sets the library/type rules under which this sample was approved.</summary>
+    public List<string> RuleScopes { get; set; } = new();
 }
 
 /// <summary>
@@ -61,4 +118,16 @@ public class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>Gets or sets the per-library rule sets.</summary>
     public List<LibraryRuleSet> Libraries { get; set; } = new();
+
+    /// <summary>
+    /// Gets or sets original-title backups. These are plugin metadata only: no media files or
+    /// Jellyfin provider data are changed by keeping this journal.
+    /// </summary>
+    public List<OriginalTitleBackup> OriginalTitleBackups { get; set; } = new();
+
+    /// <summary>Gets or sets individually reviewed original-title approvals.</summary>
+    public List<OriginalTitleApproval> OriginalTitleApprovals { get; set; } = new();
+
+    /// <summary>Gets or sets reviewed library/type scopes, including future imports.</summary>
+    public List<string> OriginalTitleApprovedScopes { get; set; } = new();
 }

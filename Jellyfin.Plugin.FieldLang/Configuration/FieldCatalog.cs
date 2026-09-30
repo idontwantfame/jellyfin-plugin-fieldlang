@@ -11,11 +11,13 @@ namespace Jellyfin.Plugin.FieldLang.Configuration;
 /// <param name="Label">Human label for the configuration page.</param>
 /// <param name="LockField">The field that pins this value, or null if Jellyfin has no lock for it.</param>
 /// <param name="Apply">Copies the localized value onto the item; returns true if anything changed.</param>
+/// <param name="RequiresLanguage">Whether the configuration UI should collect a language code.</param>
 public sealed record LocalizableField(
     string Name,
     string Label,
     MetadataField? LockField,
-    Func<LocalizedFields, BaseItem, bool> Apply);
+    Func<LocalizedFields, BaseItem, bool> Apply,
+    bool RequiresLanguage = true);
 
 /// <summary>
 /// The item types and fields this plugin knows how to localize.
@@ -52,6 +54,15 @@ public static class FieldCatalog
         "Tagline", "Tagline", null,
         src => src.Tagline, item => item.Tagline, (item, value) => item.Tagline = value);
 
+    /// <summary>
+    /// A special title rule. It is handled by <see cref="FieldLangApplier"/> instead of a
+    /// localized TMDb payload, because each item chooses its own source language.
+    /// </summary>
+    private static readonly LocalizableField _originalTitle = new(
+        "OriginalTitle", "Original title", MetadataField.Name,
+        (_, _) => false,
+        RequiresLanguage: false);
+
     private static readonly LocalizableField _genres = new(
         "Genres", "Genres", MetadataField.Genres,
         (src, item) =>
@@ -77,8 +88,8 @@ public static class FieldCatalog
     public static IReadOnlyDictionary<string, IReadOnlyList<LocalizableField>> ByItemType { get; } =
         new Dictionary<string, IReadOnlyList<LocalizableField>>(StringComparer.Ordinal)
         {
-            [Movie] = new[] { _name, _overview, _tagline, _genres },
-            [Series] = new[] { _name, _overview, _tagline, _genres },
+            [Movie] = new[] { _name, _originalTitle, _overview, _tagline, _genres },
+            [Series] = new[] { _name, _originalTitle, _overview, _tagline, _genres },
             [Season] = new[] { _name, _overview },
             [Episode] = new[] { _name, _overview },
         };

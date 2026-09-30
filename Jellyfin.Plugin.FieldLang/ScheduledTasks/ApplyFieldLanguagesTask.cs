@@ -12,8 +12,8 @@ namespace Jellyfin.Plugin.FieldLang.ScheduledTasks;
 /// Sweeps every library that has rules and applies them.
 /// </summary>
 /// <remarks>
-/// The event hook covers items as they change; this covers everything else -- the initial
-/// application after you first configure rules, and repair after a bulk refresh.
+/// This task is the plugin's only application mechanism. It applies configured rules to existing
+/// items and new imports, and repairs metadata after refreshes when the rules allow it.
 /// </remarks>
 public class ApplyFieldLanguagesTask : IScheduledTask
 {
@@ -94,7 +94,8 @@ public class ApplyFieldLanguagesTask : IScheduledTask
         // in the library when the only rule is on movies.
         var kinds = config.Libraries
             .SelectMany(l => l.Rules)
-            .Where(r => !string.IsNullOrWhiteSpace(r.Language))
+            .Where(r => !string.IsNullOrWhiteSpace(r.Language)
+                        || string.Equals(r.Field, "OriginalTitle", StringComparison.Ordinal))
             .Select(r => _kinds.TryGetValue(r.ItemType, out var kind) ? kind : (BaseItemKind?)null)
             .OfType<BaseItemKind>()
             .Distinct()
@@ -102,7 +103,7 @@ public class ApplyFieldLanguagesTask : IScheduledTask
 
         if (kinds.Length == 0)
         {
-            _logger.LogInformation("FieldLang: rules exist but no language is set on any of them");
+            _logger.LogInformation("FieldLang: rules exist but no enabled language or original-title rule was found");
             progress.Report(100);
             return;
         }

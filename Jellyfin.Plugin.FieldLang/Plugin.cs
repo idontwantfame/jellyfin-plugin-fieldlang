@@ -12,6 +12,65 @@ namespace Jellyfin.Plugin.FieldLang;
 /// </summary>
 public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 {
+    internal static SemaphoreSlim MutationGate { get; } = new(1, 1);
+
+    /// <inheritdoc />
+    public override void UpdateConfiguration(BasePluginConfiguration configuration)
+    {
+        MutationGate.Wait();
+        try
+        {
+            var incoming = (PluginConfiguration)configuration;
+            var previousScopes = GetOriginalTitleScopes(Configuration);
+            var enabledScopes = GetOriginalTitleScopes(incoming);
+            // Journal and approvals belong to the server. A dashboard save may be based on an
+            // older config response and must not erase backups created by the running task.
+            incoming.OriginalTitleBackups = Configuration.OriginalTitleBackups;
+            incoming.OriginalTitleApprovals = Configuration.OriginalTitleApprovals
+                .Where(a => a.RuleScopes.Count == 0
+                    ? previousScopes.SetEquals(enabledScopes)
+                    : a.RuleScopes.Any(enabledScopes.Contains))
+                .Select(a => new OriginalTitleApproval
+                {
+                    ItemId = a.ItemId,
+                    CurrentTitle = a.CurrentTitle,
+                    ProposedTitle = a.ProposedTitle,
+                    RuleScopes = a.RuleScopes.Where(enabledScopes.Contains).ToList(),
+                })
+                .ToList();
+            incoming.OriginalTitleApprovedScopes = Configuration.OriginalTitleApprovedScopes
+                .Where(enabledScopes.Contains)
+                .ToList();
+            foreach (var library in incoming.Libraries)
+            {
+                foreach (var type in new[] { "Movie", "Series" })
+                {
+                    if (library.Rules.Any(r => r.ItemType == type && r.Field == "OriginalTitle"))
+                    {
+                        library.Rules.RemoveAll(r => r.ItemType == type && r.Field == "Name");
+                        foreach (var rule in library.Rules.Where(r => r.ItemType == type && r.Field == "OriginalTitle"))
+                        {
+                            rule.Lock = true;
+                        }
+                    }
+                }
+            }
+            base.UpdateConfiguration(incoming);
+        }
+        finally
+        {
+            MutationGate.Release();
+        }
+    }
+
+    internal static string OriginalTitleScope(string libraryId, string itemType) =>
+        libraryId.Replace("-", string.Empty, StringComparison.Ordinal).ToLowerInvariant() + ":" + itemType;
+
+    private static HashSet<string> GetOriginalTitleScopes(PluginConfiguration config) => config.Libraries
+        .SelectMany(l => l.Rules.Where(r => r.Field == "OriginalTitle" && r.ItemType is "Movie" or "Series")
+            .Select(r => OriginalTitleScope(l.LibraryId, r.ItemType)))
+        .ToHashSet(StringComparer.Ordinal);
+
     /// <summary>Initializes a new instance of the <see cref="Plugin"/> class.</summary>
     /// <param name="applicationPaths">Application paths.</param>
     /// <param name="xmlSerializer">XML serializer.</param>

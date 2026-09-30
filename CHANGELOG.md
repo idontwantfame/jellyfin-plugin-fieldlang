@@ -10,6 +10,7 @@
   Respect full metadata locks even when added after initial application, including during rollback.
 - Save title backups before writes, recover interrupted applications and rollbacks, preserve
   manual sort-title edits, and revoke rules and approvals during rollback.
+- Persist pending backups again before lock-only retries when the first configuration save failed.
 - Keep server-owned backups and approvals across unrelated or stale dashboard configuration saves;
   revoke sample approvals when their original-title rules are removed.
 - Skip transient TMDb timeouts per item without aborting the sweep; retain actual user cancellation.

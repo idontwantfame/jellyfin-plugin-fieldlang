@@ -29,6 +29,7 @@ void Check(bool value, string message)
 
 var config = new PluginConfiguration();
 var serialized = new List<string>();
+var failNextConfigSave = false;
 using var workspace = new TestWorkspace();
 var paths = Stub<IApplicationPaths>.Create((method, args) => method.Name.StartsWith("get_") ? workspace.Path : null);
 var serializer = Stub<IXmlSerializer>.Create((method, args) =>
@@ -42,6 +43,11 @@ var serializer = Stub<IXmlSerializer>.Create((method, args) =>
     }
     if (method.Name == "SerializeToFile")
     {
+        if (failNextConfigSave)
+        {
+            failNextConfigSave = false;
+            throw new IOException("Simulated configuration write failure");
+        }
         var file = (string)args![1]!;
         if (!file.StartsWith(workspace.Path + System.IO.Path.DirectorySeparatorChar, StringComparison.Ordinal))
             throw new Exception("Test configuration must stay in its own temporary directory");
@@ -495,6 +501,22 @@ Check(!await localizedIdentityApplier.ApplyAsync(localizedIdentity, default)
     && localizedIdentity.Name == "Corrected name" && localizedIdentity.Overview == "Corrected description"
     && localizedIdentity.Writes == 0 && localizedIdentity.LockedFields.Length == 0,
     "Provider corrections during later localized lookups must discard all staged responses");
+// Even lock-only writes require a durable journal after a failed first backup save.
+config.Libraries[0].Rules = new() { new() { ItemType = "Movie", Field = "OriginalTitle" } };
+config.OriginalTitleApprovedScopes = new() { folder.Id.ToString("N") + ":Movie" };
+var failedBackupSave = new TestMovie { Id = Guid.NewGuid(), Name = "Already original", OriginalTitle = "Already original" };
+failNextConfigSave = true;
+var backupFailureObserved = false;
+try { await applier.ApplyOriginalTitleOnlyAsync(failedBackupSave, default); }
+catch (IOException) { backupFailureObserved = true; }
+Check(backupFailureObserved && failedBackupSave.Writes == 0 && failedBackupSave.LockedFields.Length == 0,
+    "A failed initial journal save must prevent even a lock-only metadata write");
+var savedBeforeRetry = serialized.Count;
+failedBackupSave.BeforeWrite = () => Check(serialized.Count > savedBeforeRetry
+    && serialized.Last().Contains(failedBackupSave.Id.ToString("N")),
+    "Retry must durably save the pending journal before a lock-only repository write");
+Check(await applier.ApplyOriginalTitleOnlyAsync(failedBackupSave, default) && failedBackupSave.Writes == 1,
+    "An initial journal save failure must remain retryable");
 Console.WriteLine($"Passed {passed} safety checks.");
 
 public class Stub<T> : DispatchProxy where T : class
@@ -514,8 +536,10 @@ public class TestMovie : Movie
     public int Writes { get; private set; }
     public bool FailNextWrite { get; set; }
     public bool CancelNextWrite { get; set; }
+    public Action? BeforeWrite { get; set; }
     public override Task UpdateToRepositoryAsync(ItemUpdateType updateReason, CancellationToken cancellationToken)
     {
+        BeforeWrite?.Invoke();
         if (CancelNextWrite) { CancelNextWrite = false; throw new TaskCanceledException("Simulated repository timeout"); }
         if (FailNextWrite) { FailNextWrite = false; throw new IOException("Simulated repository failure"); }
         Writes++;

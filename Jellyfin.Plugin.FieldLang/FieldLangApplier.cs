@@ -303,6 +303,12 @@ public sealed class FieldLangApplier
         {
             if (backup is not null)
             {
+                if (backup.PendingWrite)
+                {
+                    // The first journal save may have failed before a lock-only write. An
+                    // in-memory recovery entry is not proof that its backup reached disk.
+                    Plugin.Instance?.SaveConfiguration();
+                }
                 return backup.PendingWrite || !(item.LockedFields ?? Array.Empty<MetadataField>()).Contains(MetadataField.Name);
             }
 

@@ -10,13 +10,75 @@ combination, set per library and per item type.
 
 | Item type | Fields |
 |---|---|
-| Movie, Series | Title, Description, Tagline, Genres |
+| Movie, Series | Title, **Original title**, Description, Tagline, Genres |
 | Season, Episode | Title, Description |
 
 Limited to what TMDb returns per language. Season and episode payloads only carry name and overview.
 
 If TMDb has no data for a field in the language you asked for, the existing value is kept rather
 than blanked.
+
+## Original titles
+
+For movies and series, enable **Original title** instead of entering a language code. This is a
+per-item rule: it uses Jellyfin's valid populated `OriginalTitle` first, then TMDb's `original_title`
+(movie) or `original_name` (series) through the item's TMDb provider id. It falls back to the
+existing display title when neither source has a usable value. Episodes are intentionally excluded:
+their original-title metadata is not reliable enough to change a server title safely.
+
+This changes the Jellyfin server's `Name`, so native clients such as Neptune see it; it is not a
+web UI overlay. An explicitly configured Jellyfin sort title is preserved. Otherwise Jellyfin's
+normal sort title follows the changed display title, keeping title and alphabetical browsing
+consistent.
+
+Before enabling the scheduled task across a library, save the rule and use **Dry-run original
+titles** on the plugin page. It lists every configured movie/series, its current and proposed
+title, and the source/reason without writing metadata. Saving a new rule does **not** approve it:
+the scheduled task will skip its original titles until you explicitly approve selected samples
+or the reviewed libraries. Preview tokens expire after 30 minutes or after settings change.
+Check representative Polish, English, and other-language samples through Jellyfin's API and Neptune
+before approving the libraries and future imports. Sample application changes only titles/locks,
+even if descriptions or other fields have separate language rules configured.
+
+Each changed title is journaled in the plugin configuration with its prior display and explicit
+sort title and the plugin's title-lock ownership. The journal is saved **before** the item write,
+and interrupted applications and rollbacks can resume safely. Dashboard configuration saves cannot
+replace the server's journal with an older copy.
+Reapproving a rule during an interrupted rollback does not discard recovery state; pending rollback
+blocks title application until it finishes and is not classified as a manual title edit.
+Sample approvals survive unchanged saves, library renames, API key changes, and edits to unrelated
+field rules. Removing an approving original-title rule revokes approvals for its samples.
+
+**Rollback original titles** revokes approvals, removes the original-title rules, and restores
+titles still owned by Field Language. It removes only title locks recorded as added by the plugin,
+leaves all unrelated locks in place, and preserves subsequent manual sort edits. Later manual
+display-title edits are skipped and their backups retained in the plugin configuration for manual
+recovery. Legacy backups without recorded lock ownership retain their locks conservatively.
+
+Original title takes precedence over a fixed-language Title rule; saving the configuration removes
+the conflicting Title rule. Original-title management **always locks Name**. Existing title locks
+or fully locked items are skipped on the first run to protect deliberate manual titles. A full item
+lock added later blocks both title application and rollback; the retained backup can be restored
+after you unlock the item and deliberately retry rollback. Already-correct
+original titles are journaled and locked too; subsequent runs perform no item writes. If the title
+changes, its provider identity changes, or its lock is removed, management is suspended and the
+current title is preserved. A changed title alone cannot reliably distinguish a provider refresh
+from a person's edit, so the plugin does not automatically overwrite either after protection is lost.
+
+Suggested rollout:
+
+1. Enable the rule in one library and save it. Run the dry-run; it is read-only.
+2. Select a few Polish, English, and other-language rows and use **Apply selected samples**.
+3. Confirm the server `Name` using your user's item endpoint, `GET /Users/{userId}/Items/{itemId}`, and open the same item in Neptune. Verify descriptions and artwork remain unchanged.
+4. Run a normal metadata refresh on the samples and repeat the task; the locked titles should remain unchanged. Edit one sample title manually and verify the next run preserves your edit.
+5. Run another dry-run, then use **Approve reviewed libraries and future imports**. Run the scheduled task. Import one new item and run the task again to verify the same per-item treatment.
+6. If the result is not wanted, use rollback. It restores recorded titles without touching media files, paths, watch state, artwork, or descriptions, and prevents the next task from reapplying the rule.
+
+Administrator API tools: `POST /FieldLang/OriginalTitles/DryRun` returns a `Token` and review rows;
+`POST /FieldLang/OriginalTitles/Approve` accepts `{ "Token": "...", "ItemIds": ["..."], "ApproveLibraries": false }`
+for immediate samples, or `ApproveLibraries: true` to authorize the reviewed scopes and future imports.
+`POST /FieldLang/OriginalTitles/Rollback` revokes approvals and restores safe entries. These require
+Jellyfin administrator authentication. No external metadata or media sidecar files are written.
 
 ## Requirements
 
@@ -45,7 +107,8 @@ Run it from Dashboard → Scheduled Tasks to apply a change immediately.
 
 ## Locking
 
-Each rule has a lock toggle, on by default. Locking pins the field so Jellyfin's normal metadata
+Language rules have a lock toggle, on by default. Original-title rules always lock the title.
+Locking pins the field so Jellyfin's normal metadata
 provider stops overwriting it. Unlocked, the provider rewrites it on every refresh and the next task
 run puts it back, so the wrong language shows in between.
 
@@ -86,6 +149,28 @@ docker run --rm -v "$PWD":/src -w /src mcr.microsoft.com/dotnet/sdk:10.0 \
 ```
 
 Output lands in `Jellyfin.Plugin.FieldLang/bin/Release/net10.0/`.
+
+Run the executable regression suite (no additional test framework required):
+
+```bash
+dotnet run --project tests/FieldLang.SafetyTests.csproj
+```
+
+It exercises the plugin's actual applier and administrator endpoints with mocked Jellyfin storage
+and TMDb responses: approval gating, sample isolation, Polish/English/other-language titles,
+movies/series, original-title precedence, idempotency, manual locks/edits, missing data, lock swaps,
+interrupted writes/rollbacks, stale settings saves, rollback sorting, and approval revocation.
+Configuration saves use real XML files in a temporary directory, and plugin reloads verify that
+Unicode titles, pending-write/rollback markers, and approvals survive disk serialization.
+Timeout regressions verify that the scheduled task continues to later items while real cancellation
+still propagates. Lookups finish before metadata edits, and regressions cover full metadata locks
+and unrelated field locks added during those lookups, plus rule reapproval during interrupted rollback.
+Temporary test files are removed when the test process finishes normally.
+This suite does not replace live Jellyfin 12.1/Neptune validation on the target server.
+
+The working build is **2.1.0.0**, described in [CHANGELOG.md](CHANGELOG.md). The repository manifest
+continues to list existing published releases; add the new version only after its release archive
+has been published and its checksum calculated.
 
 ## Prior art
 

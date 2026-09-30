@@ -1,0 +1,26 @@
+# Changelog
+
+## 2.1.0.0 — Unreleased
+
+- Add per-item original titles for movies and series on Jellyfin 12, using populated valid Jellyfin
+  original titles and falling back to TMDb original titles through provider IDs.
+- Add read-only previews, selected sample application, and explicit approval of libraries and
+  future imports before the scheduled task can apply the rule.
+- Preserve existing manual locks and later title edits; original titles always use a title lock.
+  Respect full metadata locks even when added after initial application, including during rollback.
+- Save title backups before writes, recover interrupted applications and rollbacks, preserve
+  manual sort-title edits, and revoke rules and approvals during rollback.
+- Keep server-owned backups and approvals across unrelated or stale dashboard configuration saves;
+  revoke sample approvals when their original-title rules are removed.
+- Skip transient TMDb timeouts per item without aborting the sweep; retain actual user cancellation.
+- Finish remote lookups before editing shared metadata, respect full item locks added during
+  lookups, and preserve unrelated field locks added while waiting for TMDb.
+- Keep interrupted rollback recoverable when an original-title rule is reenabled and reapproved;
+  pending recovery is distinct from a manual title override.
+- Accept legitimate titles such as “Unknown” without treating their words as placeholders.
+- Fix equal-sized metadata-lock swaps and remove obsolete documentation about an event hook.
+- Add regression checks for application, approval, rollback, timeout handling, XML-backed plugin
+  restarts, and the release assembly version. Jellyfin 12.1/Neptune live validation remains pending.
+
+This release targets Jellyfin 12.0.0.0 ABI and .NET 10. The published repository manifest remains
+unchanged until a release archive and its checksum are available.

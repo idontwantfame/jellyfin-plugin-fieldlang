@@ -417,6 +417,60 @@ Check(resumeRollback.Name == "Before interrupted rollback"
     && !resumeRollback.LockedFields.Contains(MetadataField.Name)
     && !config.OriginalTitleBackups.Any(b => b.ItemId == resumeRollback.Id.ToString("N")),
     "Rollback must finish after reapproval and restart without losing its recovery record");
+// A metadata correction may change the provider identity while TMDb is responding.
+config.Libraries[0].Rules = new() { new() { ItemType = "Movie", Field = "OriginalTitle" } };
+config.OriginalTitleApprovedScopes = new() { folder.Id.ToString("N") + ":Movie" };
+var identityMovie = new TestMovie { Id = Guid.NewGuid(), Name = "Keep corrected movie" };
+identityMovie.SetProviderId(MetadataProvider.Tmdb, "1001");
+var identityHandler = new CallbackTmdbHandler(_ => identityMovie.SetProviderId(MetadataProvider.Tmdb, "1002"));
+var identityClient = new TmdbLocalizedClient(new ClientFactory(identityHandler), NullLogger<TmdbLocalizedClient>.Instance);
+var identityApplier = new FieldLangApplier(library, identityClient, NullLogger<FieldLangApplier>.Instance);
+var journalCountBeforeIdentity = config.OriginalTitleBackups.Count;
+Check(!await identityApplier.ApplyOriginalTitleOnlyAsync(identityMovie, default)
+    && identityMovie.Name == "Keep corrected movie" && identityMovie.Writes == 0,
+    "A provider correction during lookup must not apply the old movie's original title");
+Check(config.OriginalTitleBackups.Count == journalCountBeforeIdentity && identityMovie.LockedFields.Length == 0,
+    "A changed provider identity must not acquire title ownership or create a backup");
+identityMovie.SetProviderId(MetadataProvider.Tmdb, "1001");
+identityApplier.ClearCache();
+var identityPreview = await identityApplier.PreviewOriginalTitleAsync(identityMovie, default);
+Check(identityPreview is { ProposedTitle: null, WouldChange: false },
+    "Dry-run must not propose the old identity's title after an in-flight provider correction");
+Check(identityPreview!.Reason.Contains("changed during lookup", StringComparison.Ordinal),
+    "Dry-run must explain the changed metadata identity rather than report missing upstream data");
+Check(await identityApplier.ApplyOriginalTitleOnlyAsync(identityMovie, default)
+    && config.OriginalTitleBackups.Single(b => b.ItemId == identityMovie.Id.ToString("N")).TmdbId == "1002",
+    "A subsequent lookup must be able to manage the corrected provider identity");
+
+var populatedDuringLookup = new TestMovie { Id = Guid.NewGuid(), Name = "Before local metadata refresh" };
+populatedDuringLookup.SetProviderId(MetadataProvider.Tmdb, "1005");
+var populatedHandler = new CallbackTmdbHandler(_ => populatedDuringLookup.OriginalTitle = "Newly populated server original");
+var populatedClient = new TmdbLocalizedClient(new ClientFactory(populatedHandler), NullLogger<TmdbLocalizedClient>.Instance);
+var populatedApplier = new FieldLangApplier(library, populatedClient, NullLogger<FieldLangApplier>.Instance);
+Check(!await populatedApplier.ApplyOriginalTitleOnlyAsync(populatedDuringLookup, default)
+    && populatedDuringLookup.Name == "Before local metadata refresh" && populatedDuringLookup.Writes == 0,
+    "A local original title populated during lookup must invalidate the stale fallback response");
+Check(await populatedApplier.ApplyOriginalTitleOnlyAsync(populatedDuringLookup, default)
+    && populatedDuringLookup.Name == "Newly populated server original" && populatedHandler.Requests == 1,
+    "The next application must prefer refreshed server OriginalTitle without another TMDb request");
+
+config.Libraries[0].Rules = new()
+{
+    new() { ItemType = "Movie", Field = "Name", Language = "en" },
+    new() { ItemType = "Movie", Field = "Overview", Language = "pl" },
+};
+var localizedIdentity = new TestMovie { Id = Guid.NewGuid(), Name = "Corrected name", Overview = "Corrected description" };
+localizedIdentity.SetProviderId(MetadataProvider.Tmdb, "1003");
+var localizedIdentityHandler = new CallbackTmdbHandler(requestNumber =>
+{
+    if (requestNumber == 2) localizedIdentity.SetProviderId(MetadataProvider.Tmdb, "1004");
+});
+var localizedIdentityClient = new TmdbLocalizedClient(new ClientFactory(localizedIdentityHandler), NullLogger<TmdbLocalizedClient>.Instance);
+var localizedIdentityApplier = new FieldLangApplier(library, localizedIdentityClient, NullLogger<FieldLangApplier>.Instance);
+Check(!await localizedIdentityApplier.ApplyAsync(localizedIdentity, default)
+    && localizedIdentity.Name == "Corrected name" && localizedIdentity.Overview == "Corrected description"
+    && localizedIdentity.Writes == 0 && localizedIdentity.LockedFields.Length == 0,
+    "Provider corrections during later localized lookups must discard all staged responses");
 Console.WriteLine($"Passed {passed} safety checks.");
 
 public class Stub<T> : DispatchProxy where T : class

@@ -104,12 +104,13 @@ public sealed class FieldLangApplier
 
         // Finish remote lookups before modifying the shared BaseItem. A user can lock metadata
         // while a request is in flight; no earlier rule should leave a partial in-memory edit.
+        var lookupIdentity = LookupIdentity(item);
         var localizedGroups = new List<(List<FieldLanguageRule> Rules, LocalizedFields Fields)>();
         foreach (var group in rules.Where(r => r.Field != "OriginalTitle")
                      .GroupBy(r => r.Language, StringComparer.OrdinalIgnoreCase))
         {
             var localized = await FetchAsync(item, itemType, group.Key, cancellationToken).ConfigureAwait(false);
-            if (item.IsLocked)
+            if (item.IsLocked || LookupIdentity(item) != lookupIdentity)
             {
                 return false;
             }
@@ -135,7 +136,7 @@ public sealed class FieldLangApplier
             }
         }
 
-        if (item.IsLocked)
+        if (item.IsLocked || LookupIdentity(item) != lookupIdentity)
         {
             return false;
         }
@@ -220,7 +221,7 @@ public sealed class FieldLangApplier
         var candidate = await GetOriginalTitleAsync(item, itemType, cancellationToken).ConfigureAwait(false);
         if (candidate.Title is null)
         {
-            return Preview(item, itemType, null, "no populated Jellyfin OriginalTitle or TMDb original title", false);
+            return Preview(item, itemType, null, candidate.Source, false);
         }
 
         return Preview(
@@ -355,14 +356,28 @@ public sealed class FieldLangApplier
             return (null, "no TMDb provider id");
         }
 
+        var originalTitleBeforeLookup = item.OriginalTitle;
         var candidate = itemType switch
         {
             FieldCatalog.Movie => (await _tmdb.GetMovieOriginalTitleAsync(tmdbId, cancellationToken).ConfigureAwait(false), "TMDb original_title"),
             FieldCatalog.Series => (await _tmdb.GetSeriesOriginalTitleAsync(tmdbId, cancellationToken).ConfigureAwait(false), "TMDb original_name"),
             _ => (null, "original titles are not reliable for this item type"),
         };
+        if (tmdbId != item.GetProviderId(MetadataProvider.Tmdb)
+            || originalTitleBeforeLookup != item.OriginalTitle)
+        {
+            return (null, "original-title metadata changed during lookup; run another dry-run");
+        }
         return OriginalTitlePolicy.IsValidTitle(candidate.Item1) ? candidate : (null, "no valid original title");
     }
+
+    // Season and episode responses belong to a parent series and numbering, not their own id.
+    private static (string? TmdbId, int? Season, int? Episode) LookupIdentity(BaseItem item) => item switch
+    {
+        Season season => (season.Series?.GetProviderId(MetadataProvider.Tmdb), season.IndexNumber, null),
+        Episode episode => (episode.Series?.GetProviderId(MetadataProvider.Tmdb), episode.ParentIndexNumber, episode.IndexNumber),
+        _ => (item.GetProviderId(MetadataProvider.Tmdb), null, null),
+    };
 
     private static string? PreservationReason(BaseItem item, OriginalTitleBackup? backup) =>
         OriginalTitlePolicy.PreservationReason(item.Name,

@@ -17,6 +17,8 @@
   recovery journals for retry, and report completion for empty libraries.
 - Finish remote lookups before editing shared metadata, respect full item locks added during
   lookups, and preserve unrelated field locks added while waiting for TMDb.
+- Discard responses when provider identity or original-title source metadata changes during a
+  lookup; report the reason in dry-run output and retry against corrected metadata on the next run.
 - Keep interrupted rollback recoverable when an original-title rule is reenabled and reapproved;
   pending recovery is distinct from a manual title override.
 - Respect removed title locks during rollback, even before the scheduled task detects the edit;

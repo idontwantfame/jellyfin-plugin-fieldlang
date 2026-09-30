@@ -79,27 +79,38 @@ public class ApplyFieldLanguagesTask : IScheduledTask
     /// <inheritdoc />
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
-        var config = Plugin.Instance?.Configuration;
-        if (config is null || config.Libraries.Count == 0)
+        BaseItemKind[] kinds;
+        // Rollback mutates rule lists in place. Snapshot them under the mutation gate, then
+        // release it before item application (which acquires the same gate for each item).
+        await Plugin.MutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            _logger.LogInformation("FieldLang: no rules configured, nothing to do");
-            progress.Report(100);
-            return;
+            var config = Plugin.Instance?.Configuration;
+            if (config is null || config.Libraries.Count == 0)
+            {
+                _logger.LogInformation("FieldLang: no rules configured, nothing to do");
+                progress.Report(100);
+                return;
+            }
+
+            // Start from a clean cache so a manual run picks up upstream TMDb edits.
+            _tmdb.ClearCache();
+
+            // Only query the item kinds that actually have a rule -- no point walking every episode
+            // in the library when the only rule is on movies.
+            kinds = config.Libraries
+                .SelectMany(l => l.Rules)
+                .Where(r => !string.IsNullOrWhiteSpace(r.Language)
+                            || string.Equals(r.Field, "OriginalTitle", StringComparison.Ordinal))
+                .Select(r => _kinds.TryGetValue(r.ItemType, out var kind) ? kind : (BaseItemKind?)null)
+                .OfType<BaseItemKind>()
+                .Distinct()
+                .ToArray();
         }
-
-        // Start from a clean cache so a manual run picks up upstream TMDb edits.
-        _tmdb.ClearCache();
-
-        // Only query the item kinds that actually have a rule -- no point walking every episode
-        // in the library when the only rule is on movies.
-        var kinds = config.Libraries
-            .SelectMany(l => l.Rules)
-            .Where(r => !string.IsNullOrWhiteSpace(r.Language)
-                        || string.Equals(r.Field, "OriginalTitle", StringComparison.Ordinal))
-            .Select(r => _kinds.TryGetValue(r.ItemType, out var kind) ? kind : (BaseItemKind?)null)
-            .OfType<BaseItemKind>()
-            .Distinct()
-            .ToArray();
+        finally
+        {
+            Plugin.MutationGate.Release();
+        }
 
         if (kinds.Length == 0)
         {

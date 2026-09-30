@@ -63,12 +63,17 @@ plugin.UpdateConfiguration(config);
 config = plugin.Configuration;
 var folder = new CollectionFolder { Id = Guid.NewGuid() };
 var items = new List<BaseItem>();
-var library = Stub<ILibraryManager>.Create((method, args) => method.Name switch
+var libraryQueries = 0;
+var library = Stub<ILibraryManager>.Create((method, args) =>
 {
-    "GetCollectionFolders" => new List<Folder> { folder },
-    "GetItemList" => items,
-    "GetItemById" => items.FirstOrDefault(i => i.Id == (Guid)args![0]!),
-    _ => null,
+    if (method.Name == "GetItemList") libraryQueries++;
+    return method.Name switch
+    {
+        "GetCollectionFolders" => new List<Folder> { folder },
+        "GetItemList" => items,
+        "GetItemById" => items.FirstOrDefault(i => i.Id == (Guid)args![0]!),
+        _ => null,
+    };
 });
 var handler = new TmdbHandler();
 var tmdb = new TmdbLocalizedClient(new ClientFactory(handler), NullLogger<TmdbLocalizedClient>.Instance);
@@ -517,6 +522,31 @@ failedBackupSave.BeforeWrite = () => Check(serialized.Count > savedBeforeRetry
     "Retry must durably save the pending journal before a lock-only repository write");
 Check(await applier.ApplyOriginalTitleOnlyAsync(failedBackupSave, default) && failedBackupSave.Writes == 1,
     "An initial journal save failure must remain retryable");
+
+// Task startup must snapshot rules under the same gate used by rollback and configuration saves.
+items.Clear();
+var mutationGate = (SemaphoreSlim)typeof(Plugin).GetProperty("MutationGate", BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
+var queriesBeforeSnapshot = libraryQueries;
+var snapshotProgress = new RecordedProgress();
+Task snapshotSweep;
+bool waitedForConfiguration;
+await mutationGate.WaitAsync();
+try
+{
+    snapshotSweep = sweep.ExecuteAsync(snapshotProgress, default);
+    waitedForConfiguration = !snapshotSweep.IsCompleted && libraryQueries == queriesBeforeSnapshot;
+    // Simulate rollback disabling title rules while the task is waiting to start.
+    config.Libraries[0].Rules.Clear();
+}
+finally { mutationGate.Release(); }
+await snapshotSweep;
+Check(waitedForConfiguration, "A sweep must wait for ongoing metadata/configuration mutations before reading its rules");
+Check(libraryQueries == queriesBeforeSnapshot && snapshotProgress.Last == 100,
+    "A sweep must use rules after rollback completes rather than querying stale enabled types");
+var cancelledEmptySweep = false;
+try { await sweep.ExecuteAsync(new RecordedProgress(), cancelled.Token); }
+catch (OperationCanceledException) { cancelledEmptySweep = true; }
+Check(cancelledEmptySweep, "Task cancellation must also propagate before an empty-rule sweep");
 Console.WriteLine($"Passed {passed} safety checks.");
 
 public class Stub<T> : DispatchProxy where T : class

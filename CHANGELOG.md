@@ -16,6 +16,8 @@
 - Skip transient TMDb timeouts per item without aborting the sweep; retain actual user cancellation.
 - Keep sweeps running after repository-level timeouts unrelated to task cancellation, retain
   recovery journals for retry, and report completion for empty libraries.
+- Snapshot scheduled-task rules under the metadata mutation gate to avoid racing rollback or
+  configuration saves; propagate cancellation even when no enabled rules remain.
 - Finish remote lookups before editing shared metadata, respect full item locks added during
   lookups, and preserve unrelated field locks added while waiting for TMDb.
 - Discard responses when provider identity or original-title source metadata changes during a

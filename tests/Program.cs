@@ -454,6 +454,30 @@ Check(await populatedApplier.ApplyOriginalTitleOnlyAsync(populatedDuringLookup, 
     && populatedDuringLookup.Name == "Newly populated server original" && populatedHandler.Requests == 1,
     "The next application must prefer refreshed server OriginalTitle without another TMDb request");
 
+var lockedDuringPreview = new TestMovie { Id = Guid.NewGuid(), Name = "Protected during preview" };
+lockedDuringPreview.SetProviderId(MetadataProvider.Tmdb, "1006");
+var previewLockHandler = new CallbackTmdbHandler(_ => lockedDuringPreview.IsLocked = true);
+var previewLockClient = new TmdbLocalizedClient(new ClientFactory(previewLockHandler), NullLogger<TmdbLocalizedClient>.Instance);
+var previewLockApplier = new FieldLangApplier(library, previewLockClient, NullLogger<FieldLangApplier>.Instance);
+var lockedPreview = await previewLockApplier.PreviewOriginalTitleAsync(lockedDuringPreview, default);
+Check(lockedPreview is { ProposedTitle: null, WouldChange: false }
+    && lockedPreview.Reason.Contains("locked", StringComparison.Ordinal),
+    "Dry-run must recheck locks added while awaiting the original-title lookup");
+
+var editedDuringPreview = new TestMovie { Id = Guid.NewGuid(), Name = "Before preview edit" };
+editedDuringPreview.SetProviderId(MetadataProvider.Tmdb, "1007");
+var previewEditHandler = new CallbackTmdbHandler(_ => editedDuringPreview.Name = "Manual edit during preview");
+var previewEditClient = new TmdbLocalizedClient(new ClientFactory(previewEditHandler), NullLogger<TmdbLocalizedClient>.Instance);
+var previewEditApplier = new FieldLangApplier(library, previewEditClient, NullLogger<FieldLangApplier>.Instance);
+var editedPreview = await previewEditApplier.PreviewOriginalTitleAsync(editedDuringPreview, default);
+Check(editedPreview is { ProposedTitle: null, WouldChange: false }
+    && editedPreview.CurrentTitle == "Manual edit during preview",
+    "Dry-run must not offer a concurrently edited title for immediate approval");
+Check(lockedDuringPreview.Writes == 0 && editedDuringPreview.Writes == 0
+    && !config.OriginalTitleBackups.Any(b => b.ItemId == lockedDuringPreview.Id.ToString("N")
+        || b.ItemId == editedDuringPreview.Id.ToString("N")),
+    "Concurrent-edit previews must remain non-mutating");
+
 config.Libraries[0].Rules = new()
 {
     new() { ItemType = "Movie", Field = "Name", Language = "en" },

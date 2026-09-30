@@ -218,7 +218,17 @@ public sealed class FieldLangApplier
             return Preview(item, itemType, null, preservationReason, false);
         }
 
+        var nameBeforeLookup = item.Name;
         var candidate = await GetOriginalTitleAsync(item, itemType, cancellationToken).ConfigureAwait(false);
+        // Preview must use the same preservation checks as application after a remote await.
+        if (PreservationReason(item, backup) is { } reasonAfterLookup)
+        {
+            return Preview(item, itemType, null, reasonAfterLookup, false);
+        }
+        if (item.Name != nameBeforeLookup)
+        {
+            return Preview(item, itemType, null, "title changed during lookup; run another dry-run", false);
+        }
         if (candidate.Title is null)
         {
             return Preview(item, itemType, null, candidate.Source, false);

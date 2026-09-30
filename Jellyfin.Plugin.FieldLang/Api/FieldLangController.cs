@@ -260,7 +260,8 @@ public class FieldLangController : ControllerBase
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!Guid.TryParse(backup.ItemId, out var itemId)
                     || _libraryManager.GetItemById(itemId) is not BaseItem item
-                    || !OriginalTitlePolicy.CanRollback(item.Name, backup, item.IsLocked)
+                    || !OriginalTitlePolicy.CanRollback(item.Name, backup, item.IsLocked,
+                        (item.LockedFields ?? Array.Empty<MetadataField>()).Contains(MetadataField.Name))
                     || (backup.TmdbId is not null && backup.TmdbId != item.GetProviderId(MediaBrowser.Model.Entities.MetadataProvider.Tmdb)))
                 {
                     skipped++;

@@ -17,6 +17,8 @@
   lookups, and preserve unrelated field locks added while waiting for TMDb.
 - Keep interrupted rollback recoverable when an original-title rule is reenabled and reapproved;
   pending recovery is distinct from a manual title override.
+- Respect removed title locks during rollback, even before the scheduled task detects the edit;
+  retain interrupted-write recovery and backups for deliberately skipped items.
 - Accept legitimate titles such as “Unknown” without treating their words as placeholders.
 - Fix equal-sized metadata-lock swaps and remove obsolete documentation about an event hook.
 - Add regression checks for application, approval, rollback, timeout handling, XML-backed plugin

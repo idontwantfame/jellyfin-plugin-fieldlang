@@ -189,6 +189,12 @@ Check(!await applier.ApplyOriginalTitleOnlyAsync(missing, default)
     && missing.Name == "Keep existing title" && missing.LockedFields.Length == 0,
     "Missing original titles must preserve the display title without locking it");
 
+// Removing the title lock relinquishes ownership, even before another application detects it.
+var unlockedTitle = new TestMovie { Id = Guid.NewGuid(), Name = "Before unlocking", OriginalTitle = "Original unlocked title" };
+items.Add(unlockedTitle);
+await applier.ApplyOriginalTitleOnlyAsync(unlockedTitle, default);
+unlockedTitle.LockedFields = Array.Empty<MetadataField>();
+
 // Metadata APIs may send a stale copy of server-owned state along with edited settings.
 var incoming = System.Text.Json.JsonSerializer.Deserialize<PluginConfiguration>(System.Text.Json.JsonSerializer.Serialize(config))!;
 incoming.OriginalTitleBackups.Clear();
@@ -222,10 +228,16 @@ Check(lockedLater.Name == "Managed title" && lockedLater.Writes == 1
     "Rollback must preserve titles and locks of fully locked items");
 Check(config.OriginalTitleBackups.Any(b => b.ItemId == lockedLater.Id.ToString("N")),
     "Rollback must retain the backup for an item skipped because it is fully locked");
+Check(unlockedTitle.Name == "Original unlocked title" && unlockedTitle.Writes == 1
+    && config.OriginalTitleBackups.Any(b => b.ItemId == unlockedTitle.Id.ToString("N")),
+    "Rollback must preserve a title whose lock was removed without requiring an intervening task run");
+unlockedTitle.LockedFields = new[] { MetadataField.Name };
 lockedLater.IsLocked = false;
 await controller.RollbackOriginalTitles(default);
 Check(lockedLater.Name == "Before lock" && !lockedLater.LockedFields.Contains(MetadataField.Name),
     "Unlocking a previously skipped item must allow a later deliberate rollback");
+Check(unlockedTitle.Name == "Before unlocking" && unlockedTitle.LockedFields.Length == 0,
+    "Restoring title protection must allow a deliberate rollback of the retained backup");
 
 // Approvals survive unrelated settings changes, but removing their title rule revokes them.
 config.Libraries[0].Rules.Add(new() { ItemType = "Movie", Field = "OriginalTitle" });

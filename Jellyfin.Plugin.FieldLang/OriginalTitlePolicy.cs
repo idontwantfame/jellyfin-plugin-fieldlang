@@ -54,8 +54,11 @@ public static class OriginalTitlePolicy
     }
 
     /// <summary>Whether rollback may restore a title without replacing a later edit.</summary>
-    public static bool CanRollback(string name, OriginalTitleBackup backup, bool itemLocked = false) =>
+    public static bool CanRollback(string name, OriginalTitleBackup backup, bool itemLocked = false, bool nameLocked = true) =>
         !itemLocked && !backup.ManualOverrideDetected
+        // A removed title lock relinquishes ownership just as it does during application.
+        // Pending operations may legitimately have no lock because their write did not finish.
+        && (!backup.LockOwnershipRecorded || nameLocked || backup.PendingWrite || backup.PendingRollback)
         && (string.Equals(name, backup.LastAppliedName, StringComparison.Ordinal)
             || (backup.PendingRollback && string.Equals(name, backup.OriginalName, StringComparison.Ordinal))
             || (backup.PendingWrite && string.Equals(name,

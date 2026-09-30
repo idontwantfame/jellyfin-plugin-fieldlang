@@ -68,7 +68,7 @@ public sealed class FieldLangApplier
 
         var changed = false;
         var locked = new HashSet<MetadataField>(item.LockedFields ?? Array.Empty<MetadataField>());
-        var lockedBefore = locked.Count;
+        var lockedBefore = new HashSet<MetadataField>(locked);
 
         // One TMDb request per distinct language, not per rule.
         foreach (var group in rules.GroupBy(r => r.Language, StringComparer.OrdinalIgnoreCase))
@@ -105,7 +105,7 @@ public sealed class FieldLangApplier
             }
         }
 
-        if (locked.Count != lockedBefore)
+        if (!locked.SetEquals(lockedBefore))
         {
             item.LockedFields = locked.ToArray();
             changed = true;

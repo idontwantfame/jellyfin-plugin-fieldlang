@@ -88,6 +88,27 @@ Jellyfin administrator authentication. No external metadata or media sidecar fil
 
 ## Install
 
+### Current source build (2.1.0.0)
+
+The original-title feature is currently available only by building this source. The repository
+manifest below still lists older published releases; adding its URL will **not** install this build.
+
+1. Build the DLL using the commands in [Build](#build).
+2. Stop Jellyfin and back up its server data/appdata, including the plugin configuration containing
+   settings and title rollback records.
+3. Locate Jellyfin's existing `plugins` directory. On Unraid, use your container's appdata mapping;
+   the exact path depends on the container image and its configuration.
+4. Move existing Field Language version folders outside `plugins` as a backup. Preserve its
+   configuration XML; do not delete the plugin configuration directory.
+5. Create `Field Language_2.1.0.0` inside `plugins` and copy
+   `Jellyfin.Plugin.FieldLang/bin/Release/net10.0/Jellyfin.Plugin.FieldLang.dll` into it.
+   Copy only this plugin DLL, not Jellyfin's own DLLs from the build output. Ensure the Jellyfin
+   container user can read the folder and DLL.
+6. Start Jellyfin, check its startup logs and Dashboard → Plugins, then follow the sample-first
+   rollout in [Original titles](#original-titles). Live Jellyfin 12.1/Neptune validation is still required.
+
+### Published releases
+
 Dashboard → Plugins → Repositories → add:
 
 ```

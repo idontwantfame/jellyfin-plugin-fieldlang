@@ -1,0 +1,121 @@
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the current version and update the Jellyfin catalogue (main only)
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      tag: ${{ steps.package.outputs.tag }}
+      archive: ${{ steps.package.outputs.archive }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - name: Validate manual publishing branch
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        run: test "$GITHUB_REF" = refs/heads/main
+      - name: Build plugin
+        run: dotnet build Jellyfin.Plugin.FieldLang/Jellyfin.Plugin.FieldLang.csproj -c Release -p:ContinuousIntegrationBuild=true --warnaserror
+      - name: Run metadata safety checks
+        run: dotnet run --project tests/FieldLang.SafetyTests.csproj -c Release -p:ContinuousIntegrationBuild=true
+      - name: Run release tooling tests
+        run: python3 -m unittest discover -s tests -p 'test_release.py' -v
+      - name: Check configuration JavaScript
+        run: |
+          node -e 'const fs=require("fs");const vm=require("vm");const page=fs.readFileSync("Jellyfin.Plugin.FieldLang/Configuration/configPage.html","utf8");new vm.Script(page.match(/<script type="text\/javascript">([\s\S]*?)<\/script>/)[1]);'
+      - name: Package plugin and catalogue
+        id: package
+        env:
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+        run: |
+          arguments=(--output dist --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA")
+          if [ -n "$RELEASE_TAG" ]; then arguments+=(--tag "$RELEASE_TAG"); fi
+          python3 scripts/release.py package "${arguments[@]}"
+          python3 -c 'import json, os; m=json.load(open("dist/metadata.json")); f=open(os.environ["GITHUB_OUTPUT"], "a"); f.write("tag="+m["tag"]+"\narchive="+m["archive"]+"\n")'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: field-language
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    needs: build
+    if: github.repository == 'idontwantfame/jellyfin-plugin-fieldlang' && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: field-language-publish
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ needs.build.outputs.tag }}
+      RELEASE_ARCHIVE: ${{ needs.build.outputs.archive }}
+      BUILD_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/download-artifact@v8
+        with:
+          name: field-language
+          path: dist
+      - name: Verify release source and checksums
+        run: |
+          git merge-base --is-ancestor "$BUILD_SHA" HEAD
+          cd dist
+          md5sum --check "$RELEASE_ARCHIVE.md5"
+          sha256sum --check "$RELEASE_ARCHIVE.sha256"
+      - name: Publish release assets
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            previous=$(mktemp -d)
+            gh release download "$RELEASE_TAG" --pattern "$RELEASE_ARCHIVE" --dir "$previous"
+            cmp "dist/$RELEASE_ARCHIVE" "$previous/$RELEASE_ARCHIVE"
+            test "$(gh release view "$RELEASE_TAG" --json isDraft,isPrerelease --jq '.isDraft or .isPrerelease')" = false
+          else
+            gh release create "$RELEASE_TAG" \
+              "dist/$RELEASE_ARCHIVE" "dist/$RELEASE_ARCHIVE.md5" "dist/$RELEASE_ARCHIVE.sha256" \
+              dist/manifest.json \
+              --target "$BUILD_SHA" --title "Field Language $RELEASE_TAG" \
+              --notes-file dist/release-notes.md
+          fi
+      - name: Update Jellyfin catalogue after publishing
+        run: |
+          git pull --ff-only origin main
+          python3 scripts/release.py merge-manifest --current manifest.json --release dist/manifest.json --changelog CHANGELOG.md
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add manifest.json CHANGELOG.md
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: publish catalogue entry for $RELEASE_TAG"
+            git push origin HEAD:main
+          fi

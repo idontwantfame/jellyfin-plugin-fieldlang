@@ -344,7 +344,9 @@ var sweepCancelled = false;
 try { await sweep.ExecuteAsync(progress, cancelled.Token); }
 catch (OperationCanceledException) { sweepCancelled = true; }
 Check(sweepCancelled, "Actual scheduled-task cancellation must still propagate");
-Check(typeof(Plugin).Assembly.GetName().Version == new Version(2, 1, 0, 0), "New release assembly must report version 2.1.0.0");
+Check(typeof(Plugin).Assembly.GetName().Version?.ToString()
+    == System.Diagnostics.FileVersionInfo.GetVersionInfo(typeof(Plugin).Assembly.Location).FileVersion,
+    "Plugin assembly and file release versions must agree");
 
 // Remote lookups may overlap a dashboard metadata lock. Stage responses before any item edits.
 config.Libraries[0].Rules = new()

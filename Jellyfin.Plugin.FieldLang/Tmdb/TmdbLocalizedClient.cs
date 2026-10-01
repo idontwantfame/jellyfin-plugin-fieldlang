@@ -115,6 +115,7 @@ public sealed class TmdbLocalizedClient
 
     private async Task<LocalizedFields?> GetAsync(string path, string cacheKey, string language, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var key = cacheKey + ":" + language;
         if (_cache.TryGetValue(key, out var cached))
         {
@@ -178,6 +179,7 @@ public sealed class TmdbLocalizedClient
         string property,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var key = "original:" + cacheKey;
         if (_originalTitleCache.TryGetValue(key, out var cached))
         {

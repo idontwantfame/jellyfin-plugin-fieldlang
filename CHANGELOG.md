@@ -14,6 +14,7 @@
 - Keep server-owned backups and approvals across unrelated or stale dashboard configuration saves;
   revoke sample approvals when their original-title rules are removed.
 - Skip transient TMDb timeouts per item without aborting the sweep; retain actual user cancellation.
+- Respect cancelled requests even when TMDb metadata is already cached.
 - Keep sweeps running after repository-level timeouts unrelated to task cancellation, retain
   recovery journals for retry, and report completion for empty libraries.
 - Snapshot scheduled-task rules under the metadata mutation gate to avoid racing rollback or

@@ -547,6 +547,20 @@ var cancelledEmptySweep = false;
 try { await sweep.ExecuteAsync(new RecordedProgress(), cancelled.Token); }
 catch (OperationCanceledException) { cancelledEmptySweep = true; }
 Check(cancelledEmptySweep, "Task cancellation must also propagate before an empty-rule sweep");
+
+// Cancellation must not be bypassed just because a successful response is cached.
+Check(await timeoutClient.GetMovieOriginalTitleAsync("1", default) == "Recovered original",
+    "Cancellation regression must start with a populated original-title cache");
+Check((await timeoutClient.GetMovieAsync("2", "en", default))?.Name == "Recovered localized",
+    "Cancellation regression must start with a populated localized-field cache");
+var cachedOriginalCancelled = false;
+try { await timeoutClient.GetMovieOriginalTitleAsync("1", cancelled.Token); }
+catch (OperationCanceledException) { cachedOriginalCancelled = true; }
+Check(cachedOriginalCancelled, "Original-title cache hits must respect cancellation");
+var cachedLocalizedCancelled = false;
+try { await timeoutClient.GetMovieAsync("2", "en", cancelled.Token); }
+catch (OperationCanceledException) { cachedLocalizedCancelled = true; }
+Check(cachedLocalizedCancelled, "Localized metadata cache hits must respect cancellation");
 Console.WriteLine($"Passed {passed} safety checks.");
 
 public class Stub<T> : DispatchProxy where T : class

@@ -2,6 +2,9 @@
 
 ## 2.1.0.0 — Unreleased
 
+- Add GitHub build/test artifacts and tag/manual releases, catalogue publication, archive
+  checksums, and release changelogs generated from commits since the previous version tag.
+- Point installation documentation to idontwantfame's fork and credit rbcetin as the original author.
 - Add per-item original titles for movies and series on Jellyfin 12, using populated valid Jellyfin
   original titles and falling back to TMDb original titles through provider IDs.
 - Add read-only previews, selected sample application, and explicit approval of libraries and

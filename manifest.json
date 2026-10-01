@@ -4,7 +4,7 @@
     "name": "Field Language",
     "description": "Pull individual metadata fields in different languages, per library and item type. Keep titles in English while descriptions come in your own language, or any other combination.",
     "overview": "Per-field metadata language",
-    "owner": "rbcetin",
+    "owner": "idontwantfame",
     "category": "Metadata",
     "imageUrl": "",
     "versions": [

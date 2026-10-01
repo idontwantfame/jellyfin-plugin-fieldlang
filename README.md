@@ -2,6 +2,12 @@
 
 Jellyfin plugin that pulls individual metadata fields in different languages.
 
+This is [idontwantfame's fork](https://github.com/idontwantfame/jellyfin-plugin-fieldlang) of
+[rbcetin's original Field Language plugin](https://github.com/rbcetin/jellyfin-plugin-fieldlang).
+Credit to **rbcetin** for the original plugin and scheduled-task architecture. This fork adds
+server-stored original titles, safety/recovery tools, regression tests, and automated releases.
+The original MIT copyright notice is preserved in [LICENSE](LICENSE).
+
 Jellyfin's metadata language is one setting per library: everything comes back in one language or
 nothing does. This lets you keep titles in English while descriptions come in Turkish, or any other
 combination, set per library and per item type.
@@ -90,8 +96,9 @@ Jellyfin administrator authentication. No external metadata or media sidecar fil
 
 ### Current source build (2.1.0.0)
 
-The original-title feature is currently available only by building this source. The repository
-manifest below still lists older published releases; adding its URL will **not** install this build.
+Until the first 2.1.0.0 release is published from this fork, the repository manifest below still
+lists older upstream releases; adding its URL will **not** install the new original-title build.
+Use the following manual steps or download a tested ZIP from a successful Actions build.
 
 1. Build the DLL using the commands in [Build](#build).
 2. Stop Jellyfin and back up its server data/appdata, including the plugin configuration containing
@@ -112,13 +119,17 @@ manifest below still lists older published releases; adding its URL will **not**
 Dashboard → Plugins → Repositories → add:
 
 ```
-https://raw.githubusercontent.com/rbcetin/jellyfin-plugin-fieldlang/main/manifest.json
+https://raw.githubusercontent.com/idontwantfame/jellyfin-plugin-fieldlang/main/manifest.json
 ```
 
 Then install Field Language from the catalogue and restart.
 
-Or do it by hand: unzip the [release](https://github.com/rbcetin/jellyfin-plugin-fieldlang/releases)
+Or do it by hand: unzip the [release](https://github.com/idontwantfame/jellyfin-plugin-fieldlang/releases)
 into `<config>/plugins/Field Language_<version>/` and restart.
+
+The fork retains the original plugin GUID, so it replaces Field Language rather than installing a
+second independent plugin. Do not leave multiple active copies installed. Historical catalogue
+entries still point to the original author's release assets; new releases point to this fork.
 
 Either way, finish in Dashboard → Plugins → Field Language: paste your TMDb key, expand a library,
 put a language code next to the fields you want, save.
@@ -164,6 +175,14 @@ so there's no UI to update.
 
 ## Build
 
+With the .NET 10 SDK installed, from the repository root:
+
+```bash
+dotnet build Jellyfin.Plugin.FieldLang/Jellyfin.Plugin.FieldLang.csproj -c Release
+```
+
+Or build using Docker:
+
 ```bash
 docker run --rm -v "$PWD":/src -w /src mcr.microsoft.com/dotnet/sdk:10.0 \
   dotnet build Jellyfin.Plugin.FieldLang/Jellyfin.Plugin.FieldLang.csproj -c Release
@@ -190,8 +209,51 @@ Temporary test files are removed when the test process finishes normally.
 This suite does not replace live Jellyfin 12.1/Neptune validation on the target server.
 
 The working build is **2.1.0.0**, described in [CHANGELOG.md](CHANGELOG.md). The repository manifest
-continues to list existing published releases; add the new version only after its release archive
-has been published and its checksum calculated.
+continues to list existing published releases until the release workflow publishes new assets.
+
+## GitHub builds and releases
+
+[Build and release](https://github.com/idontwantfame/jellyfin-plugin-fieldlang/actions/workflows/build.yml)
+runs on pushes to `main`, pull requests, version tags, and manual requests. It builds with .NET 10,
+runs the metadata safety suite and release-tooling tests, checks the configuration JavaScript,
+and uploads a `field-language` artifact. Download that artifact from the Actions run; inside it,
+`field-language_<version>.zip` contains just the plugin DLL and its MIT license. One managed DLL
+supports the target Jellyfin runtime across platforms; no separate Unraid binary is needed.
+
+To publish after sample validation:
+
+1. Push these changes to **your fork**, then enable Actions if GitHub prompts you.
+2. Open **Actions → Build and release → Run workflow**, select `main`, and check `publish`.
+   Leaving it unchecked builds an artifact without creating a release or editing the catalogue.
+3. Alternatively, push a tag matching the project's four-part assembly version, such as
+   `v2.1.0.0`. A tag mismatch fails packaging instead of publishing a mislabeled DLL.
+4. The workflow publishes the ZIP, MD5/SHA-256 checksums, and a catalogue manifest to
+   [Releases](https://github.com/idontwantfame/jellyfin-plugin-fieldlang/releases). It then updates
+   `manifest.json` and `CHANGELOG.md` on `main`. Release notes include the hand-written highlights
+   and linked commits since the previous reachable, earlier four-part version tag.
+5. Add the fork's repository URL from [Install](#install) to Jellyfin, install/update the plugin,
+   restart, and follow the sample-first original-title rollout before library-wide approval.
+
+Publishing uses GitHub's built-in `GITHUB_TOKEN`; no personal access token is required. The release
+job needs permission to write repository contents and push its catalogue/changelog commit to
+`main`. If branch protection prevents that push, the release assets remain published: download
+the release's `manifest.json` and merge its new entry (preserving existing versions), and copy its
+release notes into `CHANGELOG.md` through a normal PR. Until the catalogue commit lands, Jellyfin
+will not see the new version through the repository URL. Ordinary PR/build jobs have read-only
+permissions and cannot publish.
+
+For the next version, update `Version`, `AssemblyVersion`, and `FileVersion` in the project,
+`version` in `build.yaml`, and add the matching four-part version section to `CHANGELOG.md` before
+running the workflow. Existing published archives are never overwritten; a rerun only accepts
+an identical ZIP. Pull the workflow's catalogue/changelog commit before starting further work.
+
+Local release-tooling checks and packaging (Python 3.10+; use a fresh output directory):
+
+```bash
+python3 -m unittest discover -s tests -p 'test_release.py' -v
+python3 scripts/release.py package --output dist \
+  --repository idontwantfame/jellyfin-plugin-fieldlang --tag v2.1.0.0 --commit HEAD
+```
 
 ## Prior art
 
@@ -206,7 +268,8 @@ Long-standing upstream requests for the same thing:
 
 ## AI disclosure
 
-This plugin was written with substantial AI assistance (Claude), as
+The upstream plugin was written with substantial AI assistance (Claude); this fork's extensions,
+review fixes, and release tooling were developed with Codex assistance, as
 [Jellyfin's LLM policy](https://jellyfin.org/docs/general/contributing/llm-policies/) asks
 third-party projects to state.
 

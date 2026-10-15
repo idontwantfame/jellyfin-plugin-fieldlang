@@ -18,6 +18,8 @@ namespace Jellyfin.Plugin.FieldLang.Tmdb;
 /// </remarks>
 public sealed class LocalizedFields
 {
+    /// <summary>Gets or sets TMDb's original source language, independent of translation.</summary>
+    public string? OriginalLanguage { get; set; }
     /// <summary>Gets or sets the localized title.</summary>
     public string? Name { get; set; }
 
@@ -233,6 +235,7 @@ public sealed class TmdbLocalizedClient
     {
         var fields = new LocalizedFields
         {
+            OriginalLanguage = ReadString(root, "original_language"),
             // Movies use "title", everything else uses "name".
             Name = ReadString(root, "title") ?? ReadString(root, "name"),
             Overview = ReadString(root, "overview"),

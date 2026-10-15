@@ -26,6 +26,37 @@ than blanked.
 
 ## Original titles
 
+### Display-title language rules (2.2.0.0)
+
+Under **Rules → your library → Movie/Series → Original title**, enable **Choose by original
+language** to decide which source languages should use original display titles:
+
+| Original language | Display-title action |
+|---|---|
+| Polish (`pl`) | Use original title |
+| Japanese (`ja`) | Keep current title |
+| Other known languages | Keep current title (configurable) |
+| Unknown language / failed TMDb request | Always keep current title |
+
+Add/remove languages independently for each library and item type. Use two-letter ISO 639-1
+codes; matching ignores case and surrounding spaces. Conflicting duplicate decisions keep the
+current title. The source is TMDb's `original_language`, independent of dubbed audio, subtitles,
+the client UI language, or the library's preferred metadata language. A configured TMDb API key
+and provider ID are required for conditional rules even when Jellyfin already stores an original
+title. Failed lookups are retried on a subsequent run.
+
+New rules start with the example above. Existing 2.1 rules keep their original all-language behavior
+until you enable language conditions. Save, preview, and approve the reviewed rules and future
+imports once; later matching imports are handled on the next scheduled run. Change the task's
+schedule in Jellyfin if daily is too slow. Changing language decisions revokes the old approvals
+and requires another preview. Reordering rows or changing code capitalization does not revoke them.
+
+**Keep current title** stops further writes; it does not undo an earlier conversion or release its
+title lock. The existing rollback tool restores plugin-owned titles when needed. Manual titles,
+full metadata locks, explicit sort titles, descriptions, artwork, media paths, and watched state
+retain the protections described below. Turning conditions off restores the all-language rule and
+also requires a fresh approval. It does not silently broaden an approved Polish-only rule.
+
 For movies and series, enable **Original title** instead of entering a language code. This is a
 per-item rule: it uses Jellyfin's valid populated `OriginalTitle` first, then TMDb's `original_title`
 (movie) or `original_name` (series) through the item's TMDb provider id. It falls back to the
@@ -94,10 +125,10 @@ Jellyfin administrator authentication. No external metadata or media sidecar fil
 
 ## Install
 
-### Current source build (2.1.0.0)
+### Current source build (2.2.0.0)
 
-Until the first 2.1.0.0 release is published from this fork, the repository manifest below still
-lists older upstream releases; adding its URL will **not** install the new original-title build.
+The repository catalogue currently offers 2.1.0.0. Until 2.2.0.0 is published, adding its URL
+will **not** install the new display-title language rules.
 Use the following manual steps or download a tested ZIP from a successful Actions build.
 
 1. Build the DLL using the commands in [Build](#build).
@@ -107,7 +138,7 @@ Use the following manual steps or download a tested ZIP from a successful Action
    the exact path depends on the container image and its configuration.
 4. Move existing Field Language version folders outside `plugins` as a backup. Preserve its
    configuration XML; do not delete the plugin configuration directory.
-5. Create `Field Language_2.1.0.0` inside `plugins` and copy
+5. Create `Field Language_2.2.0.0` inside `plugins` and copy
    `Jellyfin.Plugin.FieldLang/bin/Release/net10.0/Jellyfin.Plugin.FieldLang.dll` into it.
    Copy only this plugin DLL, not Jellyfin's own DLLs from the build output. Ensure the Jellyfin
    container user can read the folder and DLL.
@@ -208,7 +239,7 @@ and unrelated field locks added during those lookups, plus rule reapproval durin
 Temporary test files are removed when the test process finishes normally.
 This suite does not replace live Jellyfin 12.1/Neptune validation on the target server.
 
-The working build is **2.1.0.0**, described in [CHANGELOG.md](CHANGELOG.md). The repository manifest
+The working build is **2.2.0.0**, described in [CHANGELOG.md](CHANGELOG.md). The repository manifest
 continues to list existing published releases until the release workflow publishes new assets.
 
 ## GitHub builds and releases
@@ -226,7 +257,7 @@ To publish after sample validation:
 2. Open **Actions → Build and release → Run workflow**, select `main`, and check `publish`.
    Leaving it unchecked builds an artifact without creating a release or editing the catalogue.
 3. Alternatively, push a tag matching the project's four-part assembly version, such as
-   `v2.1.0.0`. A tag mismatch fails packaging instead of publishing a mislabeled DLL.
+   `v2.2.0.0`. A tag mismatch fails packaging instead of publishing a mislabeled DLL.
 4. The workflow publishes the ZIP, MD5/SHA-256 checksums, and a catalogue manifest to
    [Releases](https://github.com/idontwantfame/jellyfin-plugin-fieldlang/releases). It then updates
    `manifest.json` and `CHANGELOG.md` on `main`. Release notes include the hand-written highlights
@@ -252,7 +283,7 @@ Local release-tooling checks and packaging (Python 3.10+; use a fresh output dir
 ```bash
 python3 -m unittest discover -s tests -p 'test_release.py' -v
 python3 scripts/release.py package --output dist \
-  --repository idontwantfame/jellyfin-plugin-fieldlang --tag v2.1.0.0 --commit HEAD
+  --repository idontwantfame/jellyfin-plugin-fieldlang --tag v2.2.0.0 --commit HEAD
 ```
 
 ## Prior art

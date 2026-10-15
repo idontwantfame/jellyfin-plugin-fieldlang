@@ -5,6 +5,30 @@ namespace Jellyfin.Plugin.FieldLang;
 /// <summary>Conservative ownership decisions shared by preview, application, and rollback.</summary>
 public static class OriginalTitlePolicy
 {
+    /// <summary>Normalizes ISO source-language codes for comparison.</summary>
+    public static string NormalizeLanguage(string? language) => (language ?? string.Empty).Trim().ToLowerInvariant();
+
+    /// <summary>Evaluates source-language conditions. Conflicting duplicates keep the current title.</summary>
+    public static bool ShouldUpdateDisplayTitle(FieldLanguageRule rule, string? language)
+    {
+        if (!rule.UseLanguageRules) return true;
+        var code = NormalizeLanguage(language);
+        // TMDb uses und/xx for undetermined/no language. Never guess from audio tracks or filenames.
+        if (code.Length != 2 || !code.All(char.IsAsciiLetter) || code is "und" or "xx") return false;
+        var matches = rule.LanguageRules.Where(r => NormalizeLanguage(r.Language) == code).ToList();
+        return matches.Count == 0 ? rule.DefaultUpdateDisplayTitle : matches.All(r => r.UpdateDisplayTitle);
+    }
+
+    /// <summary>Describes conditions in a stable order for approval scope identity.</summary>
+    public static string LanguageRuleIdentity(FieldLanguageRule rule) => !rule.UseLanguageRules ? string.Empty
+        : System.Text.Json.JsonSerializer.Serialize(new
+        {
+            rule.DefaultUpdateDisplayTitle,
+            Rules = rule.LanguageRules.GroupBy(r => NormalizeLanguage(r.Language), StringComparer.Ordinal)
+                .OrderBy(g => g.Key, StringComparer.Ordinal)
+                .Select(g => new { Language = g.Key, Update = g.All(r => r.UpdateDisplayTitle) }),
+        });
+
     /// <summary>Checks a candidate for blank or malformed title data without excluding real titles.</summary>
     public static bool IsValidTitle(string? title) => !string.IsNullOrWhiteSpace(title)
         && title.Length <= 1000

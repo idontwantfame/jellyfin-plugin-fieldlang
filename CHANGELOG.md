@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.2.0.0 — Unreleased
+
+- Add display-title language rules to each library's movie/series original-title settings.
+  Choose use original title or keep current title per original language, with a configurable
+  default for other known languages. New rules start with Polish enabled, Japanese disabled,
+  and other languages left alone; existing rules retain their previous behavior.
+- Read source language from TMDb rather than audio tracks or library translation settings.
+  Unknown languages, missing provider IDs and failed requests keep titles and locks unchanged.
+- Bind approvals to normalized language conditions. Changing a condition requires a new
+  preview and approval, including for future imports. Preserve the existing title journal,
+  manual-edit protections, explicit sorting, and rollback behavior.
+- Add regression coverage for conditional previews, excluded sample approvals, new imports,
+  repeated sweeps, default actions, duplicate conditions, approval invalidation and XML reloads.
+
 ## 2.1.0.0
 
 - Add GitHub build/test artifacts and tag/manual releases, catalogue publication, archive

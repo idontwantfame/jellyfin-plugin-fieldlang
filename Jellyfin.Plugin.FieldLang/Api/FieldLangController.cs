@@ -115,9 +115,8 @@ public class FieldLangController : ControllerBase
                 }
             }
 
-            var scopes = Plugin.Instance?.Configuration.Libraries.SelectMany(l => l.Rules
-                .Where(r => r.Field == "OriginalTitle" && r.ItemType is "Movie" or "Series")
-                .Select(r => Plugin.OriginalTitleScope(l.LibraryId, r.ItemType))).Distinct().ToList() ?? new();
+            var scopes = Plugin.Instance is { } plugin
+                ? Plugin.GetOriginalTitleScopes(plugin.Configuration).ToList() : new List<string>();
             // Tokens are short-lived and held only in memory. A restart or settings change requires
             // another preview; the preview itself never changes metadata or persistent approvals.
             foreach (var old in Reviews.Where(r => DateTime.UtcNow - r.Value.Created > TimeSpan.FromMinutes(30)))
@@ -197,8 +196,7 @@ public class FieldLangController : ControllerBase
                         ItemId = row.ItemId,
                         CurrentTitle = row.CurrentTitle,
                         ProposedTitle = row.ProposedTitle,
-                        RuleScopes = _libraryManager.GetCollectionFolders(item)
-                            .Select(f => Plugin.OriginalTitleScope(f.Id.ToString("N"), row.ItemType))
+                        RuleScopes = applier.GetOriginalTitleScopes(item, row.ItemType, config)
                             .Where(scope => review.Scopes.Contains(scope, StringComparer.Ordinal)).ToList(),
                     });
                     sampleIds.Add(itemId);

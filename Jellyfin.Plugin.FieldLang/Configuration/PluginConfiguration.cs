@@ -29,6 +29,25 @@ public class FieldLanguageRule
     /// to, since XmlSerializer leaves an absent element at its initialized value.
     /// </remarks>
     public bool Lock { get; set; } = true;
+
+    /// <summary>Gets or sets whether original-title changes are conditional on source language.</summary>
+    public bool UseLanguageRules { get; set; }
+
+    /// <summary>Gets or sets the action for known original languages without an explicit rule.</summary>
+    public bool DefaultUpdateDisplayTitle { get; set; }
+
+    /// <summary>Gets or sets original-language decisions for the display title.</summary>
+    public List<OriginalLanguageRule> LanguageRules { get; set; } = new();
+}
+
+/// <summary>An original-language condition for an original-title field rule.</summary>
+public class OriginalLanguageRule
+{
+    /// <summary>Gets or sets the ISO 639-1 source language, such as pl or ja.</summary>
+    public string Language { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets whether matching items should use their original display title.</summary>
+    public bool UpdateDisplayTitle { get; set; }
 }
 
 /// <summary>

@@ -30,10 +30,20 @@
         .fieldLangNote { opacity: .55; font-size: .85em; }
         .fieldLangLock { display: flex; align-items: center; gap: .35em; margin: 0; opacity: .8; }
         .fieldLangLock span { font-size: .85em; }
+        .fieldLangLanguageRules { margin: .5em 0 1.5em 1em; padding: 1em; border-left: 2px solid rgba(127,127,127,.4); }
+        .fieldLangLanguageRow { display: flex; flex-wrap: wrap; gap: .6em; align-items: center; margin: .6em 0; }
     </style>
     <div data-role="content">
         <div class="content-primary">
             <form id="FieldLangConfigForm">
+                <datalist id="FieldLangSourceLanguages">
+                    <option value="pl">Polish</option><option value="ja">Japanese</option>
+                    <option value="en">English</option><option value="fr">French</option>
+                    <option value="de">German</option><option value="es">Spanish</option>
+                    <option value="it">Italian</option><option value="ko">Korean</option>
+                    <option value="zh">Chinese</option><option value="pt">Portuguese</option>
+                    <option value="uk">Ukrainian</option><option value="ru">Russian</option>
+                </datalist>
 
                 <div class="inputContainer">
                     <label class="inputLabel inputLabelUnfocused" for="txtTmdbApiKey">TMDb API key</label>
@@ -79,6 +89,14 @@
                     It replaces the fixed-language Title rule and always locks the title. Existing
                     manual title locks are skipped. Saving this rule does not authorize any changes;
                     review a dry-run and approve samples or libraries below.
+                    <br /><br />
+                    <strong>Display-title language rules</strong> can limit original titles to selected
+                    source languages: for example Polish (<code>pl</code>) uses the original title while
+                    Japanese (<code>ja</code>) keeps the current title. Choose what happens for other
+                    languages. Unknown languages and failed lookups always keep the current title.
+                    These rules use the film or series' original language from TMDb, not dubbed audio.
+                    Changing a condition requires a new preview and approval. Keeping a title stops
+                    future changes; use rollback to restore titles already changed.
                 </div>
 
                 <div id="FieldLangRules"></div>
@@ -131,6 +149,39 @@
                 return String(s === null || s === undefined ? '' : s)
                     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
                     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            }
+
+            function languageRow(rule) {
+                return '<div class="fieldLangLanguageRow">'
+                    + '<input is="emby-input" class="fieldLangInput" data-source-language type="text"'
+                    + ' aria-label="Original language code" list="FieldLangSourceLanguages" placeholder="pl" pattern="[A-Za-z]{2}" maxlength="2" required'
+                    + ' value="' + esc(rule.Language) + '" />'
+                    + '<select is="emby-select" data-language-action aria-label="Display title action">'
+                    + '<option value="yes"' + (rule.UpdateDisplayTitle ? ' selected' : '') + '>Use original title</option>'
+                    + '<option value="no"' + (!rule.UpdateDisplayTitle ? ' selected' : '') + '>Keep current title</option></select>'
+                    + '<button type="button" is="emby-button" class="emby-button" data-remove-language>Remove</button></div>';
+            }
+
+            function languageRules(lib, type, rule) {
+                var filtered = rule ? rule.UseLanguageRules === true : true;
+                var rows = rule ? (rule.LanguageRules || []) : [
+                    { Language: 'pl', UpdateDisplayTitle: true }, { Language: 'ja', UpdateDisplayTitle: false }
+                ];
+                return '<div class="fieldLangLanguageRules" data-language-rules="' + esc(lib.Id + '|' + type.Name) + '"'
+                    + (rule ? '' : ' hidden') + '>'
+                    + '<h4>Display-title language rules</h4>'
+                    + '<label class="fieldLangLock"><input type="checkbox" is="emby-checkbox" data-use-language-rules'
+                    + (filtered ? ' checked' : '') + ' /><span>Choose by original language</span></label>'
+                    + '<div class="fieldLangLanguageOptions"' + (filtered ? '' : ' hidden') + '>'
+                    + '<div class="fieldLangNote">Two-letter ISO language codes, e.g. pl (Polish), ja (Japanese), en (English), fr (French).</div>'
+                    + '<div data-language-rows>' + rows.map(languageRow).join('') + '</div>'
+                    + '<button type="button" is="emby-button" class="emby-button" data-add-language>Add language</button>'
+                    + '<label class="fieldLangLanguageRow">Other known languages '
+                    + '<select is="emby-select" data-default-language-action>'
+                    + '<option value="no"' + (!rule || !rule.DefaultUpdateDisplayTitle ? ' selected' : '') + '>Keep current title</option>'
+                    + '<option value="yes"' + (rule && rule.DefaultUpdateDisplayTitle ? ' selected' : '') + '>Use original title</option></select></label>'
+                    + '</div><div class="fieldLangNote">Existing title locks, manual edits, backups and rollback are preserved. '
+                    + 'With language conditions off, this rule uses original titles for all languages.</div></div>';
             }
 
             // Built as an HTML string rather than createElement on purpose: assigning innerHTML
@@ -206,6 +257,9 @@
                                         + ' /><span>' + (field.Name === 'OriginalTitle' ? 'always locked' : 'lock') + '</span></label>'
                                     : '<span class="fieldLangNote">cannot be locked</span>')
                                 + '</div>';
+                            if (field.Name === 'OriginalTitle') {
+                                body += languageRules(lib, type, rule);
+                            }
                         });
                     });
 
@@ -223,6 +277,31 @@
                 });
 
                 container.innerHTML = html;
+                function syncLanguageControls() {
+                    container.querySelectorAll('[data-language-rules]').forEach(function (section) {
+                        var key = section.getAttribute('data-language-rules').split('|');
+                        var enabled = container.querySelector('[data-library="' + key[0]
+                            + '"][data-type="' + key[1] + '"][data-field="OriginalTitle"]').checked;
+                        section.hidden = !enabled;
+                        var filtered = section.querySelector('[data-use-language-rules]').checked;
+                        section.querySelector('.fieldLangLanguageOptions').hidden = !filtered;
+                        section.querySelectorAll('[data-source-language], [data-language-action], [data-default-language-action]')
+                            .forEach(function (control) { control.disabled = !enabled || !filtered; });
+                    });
+                }
+                syncLanguageControls();
+                container.onclick = function (e) {
+                    var add = e.target.closest('[data-add-language]');
+                    var remove = e.target.closest('[data-remove-language]');
+                    if (add) {
+                        add.closest('[data-language-rules]').querySelector('[data-language-rows]')
+                            .insertAdjacentHTML('beforeend', languageRow({ Language: '', UpdateDisplayTitle: true }));
+                    } else if (remove) {
+                        remove.closest('.fieldLangLanguageRow').remove();
+                    }
+                    if (add || remove) { invalidateReview(); syncLanguageControls(); }
+                };
+                container.onchange = function () { invalidateReview(); syncLanguageControls(); };
 
                 // Keep each header's badge honest as the user types.
                 container.oninput = function (e) {
@@ -242,7 +321,7 @@
                         }
                     }
                     var n = 0;
-                    container.querySelectorAll('input[data-library="' + libId + '"]').forEach(function (i) {
+                    container.querySelectorAll('input[data-field][data-library="' + libId + '"]').forEach(function (i) {
                         if ((i.type === 'checkbox' && i.checked) || (i.type !== 'checkbox' && i.value.trim())) {
                             n++;
                         }
@@ -302,12 +381,26 @@
                     var lock = container.querySelector(
                         '[data-lock-for="' + id + '|' + type + '|' + field + '"]');
 
-                    byLibrary[id].Rules.push({
+                    var rule = {
                         ItemType: type,
                         Field: field,
                         Language: lang,
                         Lock: lock ? lock.checked : false
-                    });
+                    };
+                    if (originalTitle) {
+                        var section = container.querySelector('[data-language-rules="' + id + '|' + type + '"]');
+                        rule.UseLanguageRules = section.querySelector('[data-use-language-rules]').checked;
+                        rule.DefaultUpdateDisplayTitle = section.querySelector('[data-default-language-action]').value === 'yes';
+                        rule.LanguageRules = [];
+                        section.querySelectorAll('.fieldLangLanguageRow').forEach(function (row) {
+                            var code = row.querySelector('[data-source-language]');
+                            if (code && code.value.trim()) {
+                                rule.LanguageRules.push({ Language: code.value.trim().toLowerCase(),
+                                    UpdateDisplayTitle: row.querySelector('[data-language-action]').value === 'yes' });
+                            }
+                        });
+                    }
+                    byLibrary[id].Rules.push(rule);
                 });
 
                 return Object.keys(byLibrary).map(function (k) { return byLibrary[k]; });

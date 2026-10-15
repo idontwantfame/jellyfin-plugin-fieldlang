@@ -130,7 +130,7 @@ public sealed class FieldLangApplier
         {
             if (IsApproved(item, itemType, config))
             {
-                originalTitleChanged = await ApplyOriginalTitleAsync(item, itemType, config, cancellationToken)
+                originalTitleChanged = await ApplyOriginalTitleAsync(item, itemType, config, originalTitleRule, cancellationToken)
                     .ConfigureAwait(false);
                 changed |= originalTitleChanged;
             }
@@ -219,7 +219,7 @@ public sealed class FieldLangApplier
         }
 
         var nameBeforeLookup = item.Name;
-        var candidate = await GetOriginalTitleAsync(item, itemType, cancellationToken).ConfigureAwait(false);
+        var candidate = await GetOriginalTitleAsync(item, itemType, rule, cancellationToken).ConfigureAwait(false);
         // Preview must use the same preservation checks as application after a remote await.
         if (PreservationReason(item, backup) is { } reasonAfterLookup)
         {
@@ -264,6 +264,7 @@ public sealed class FieldLangApplier
         BaseItem item,
         string itemType,
         PluginConfiguration config,
+        FieldLanguageRule rule,
         CancellationToken cancellationToken)
     {
         var backup = FindBackup(config, item);
@@ -280,7 +281,7 @@ public sealed class FieldLangApplier
         }
 
         var nameBeforeLookup = item.Name;
-        var candidate = await GetOriginalTitleAsync(item, itemType, cancellationToken).ConfigureAwait(false);
+        var candidate = await GetOriginalTitleAsync(item, itemType, rule, cancellationToken).ConfigureAwait(false);
         if (candidate.Title is null)
         {
             return false;
@@ -352,8 +353,25 @@ public sealed class FieldLangApplier
     private async Task<(string? Title, string Source)> GetOriginalTitleAsync(
         BaseItem item,
         string itemType,
+        FieldLanguageRule rule,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        var source = string.Empty;
+        if (rule.UseLanguageRules)
+        {
+            var identity = LookupIdentity(item);
+            var originalBefore = item.OriginalTitle;
+            var fields = await FetchAsync(item, itemType, "en", cancellationToken).ConfigureAwait(false);
+            if (LookupIdentity(item) != identity || item.OriginalTitle != originalBefore)
+                return (null, "source metadata changed during language lookup; run another dry-run");
+            var language = OriginalTitlePolicy.NormalizeLanguage(fields?.OriginalLanguage);
+            if (!OriginalTitlePolicy.ShouldUpdateDisplayTitle(rule, language))
+                return (null, language.Length == 0
+                    ? "original language unavailable; keeping current title"
+                    : $"original language {language}: keep current title");
+            source = $"; original language {language}: use original title";
+        }
         // Jellyfin's provider may already have captured this. It is preferable because it is
         // exactly the server's own metadata and does not require a network request.
         if (itemType is not (FieldCatalog.Movie or FieldCatalog.Series))
@@ -363,7 +381,7 @@ public sealed class FieldLangApplier
 
         if (OriginalTitlePolicy.IsValidTitle(item.OriginalTitle))
         {
-            return (item.OriginalTitle, "Jellyfin OriginalTitle");
+            return (item.OriginalTitle, "Jellyfin OriginalTitle" + source);
         }
 
         var tmdbId = item.GetProviderId(MetadataProvider.Tmdb);
@@ -384,7 +402,8 @@ public sealed class FieldLangApplier
         {
             return (null, "original-title metadata changed during lookup; run another dry-run");
         }
-        return OriginalTitlePolicy.IsValidTitle(candidate.Item1) ? candidate : (null, "no valid original title");
+        return OriginalTitlePolicy.IsValidTitle(candidate.Item1)
+            ? (candidate.Item1, candidate.Item2 + source) : (null, "no valid original title");
     }
 
     // Season and episode responses belong to a parent series and numbering, not their own id.
@@ -400,15 +419,23 @@ public sealed class FieldLangApplier
             (item.LockedFields ?? Array.Empty<MetadataField>()).Contains(MetadataField.Name),
             item.IsLocked, item.GetProviderId(MetadataProvider.Tmdb), backup);
 
+    internal IEnumerable<string> GetOriginalTitleScopes(BaseItem item, string itemType, PluginConfiguration config)
+    {
+        var libraries = _libraryManager.GetCollectionFolders(item).Select(f => f.Id.ToString("N"))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return config.Libraries.Where(l => libraries.Contains(l.LibraryId.Replace("-", string.Empty, StringComparison.Ordinal)))
+            .SelectMany(l => l.Rules.Where(r => r.ItemType == itemType && r.Field == "OriginalTitle")
+                .Select(r => Plugin.OriginalTitleScope(l.LibraryId, itemType, r)));
+    }
+
     private bool HasScopeApproval(BaseItem item, string itemType, PluginConfiguration config) =>
-        _libraryManager.GetCollectionFolders(item).Any(f => config.OriginalTitleApprovedScopes.Contains(
-            Plugin.OriginalTitleScope(f.Id.ToString("N"), itemType), StringComparer.Ordinal));
+        GetOriginalTitleScopes(item, itemType, config).Any(scope => config.OriginalTitleApprovedScopes.Contains(scope, StringComparer.Ordinal));
 
     private bool IsApproved(BaseItem item, string itemType, PluginConfiguration config) =>
         HasScopeApproval(item, itemType, config)
         || config.OriginalTitleApprovals.Any(a => a.ItemId == item.Id.ToString("N")
-            && (a.RuleScopes.Count == 0 || _libraryManager.GetCollectionFolders(item).Any(f =>
-                a.RuleScopes.Contains(Plugin.OriginalTitleScope(f.Id.ToString("N"), itemType), StringComparer.Ordinal))));
+            && (a.RuleScopes.Count == 0 || GetOriginalTitleScopes(item, itemType, config).Any(scope =>
+                a.RuleScopes.Contains(scope, StringComparer.Ordinal))));
 
     private static OriginalTitleBackup? FindBackup(PluginConfiguration config, BaseItem item) =>
         config.OriginalTitleBackups.FirstOrDefault(b => string.Equals(

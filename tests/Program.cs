@@ -563,6 +563,102 @@ var cachedLocalizedCancelled = false;
 try { await timeoutClient.GetMovieAsync("2", "en", cancelled.Token); }
 catch (OperationCanceledException) { cachedLocalizedCancelled = true; }
 Check(cachedLocalizedCancelled, "Localized metadata cache hits must respect cancellation");
+// Conditional display titles use source language, never the language of a dubbed audio track.
+var languageRule = new FieldLanguageRule
+{
+    ItemType = "Movie", Field = "OriginalTitle", UseLanguageRules = true,
+    LanguageRules = new()
+    {
+        new() { Language = " PL ", UpdateDisplayTitle = true },
+        new() { Language = "ja", UpdateDisplayTitle = false },
+    },
+};
+Check(OriginalTitlePolicy.ShouldUpdateDisplayTitle(languageRule, "pl"), "Language codes must be case/whitespace insensitive");
+Check(!OriginalTitlePolicy.ShouldUpdateDisplayTitle(languageRule, "ja"), "Explicit keep must exclude Japanese");
+Check(!OriginalTitlePolicy.ShouldUpdateDisplayTitle(languageRule, "en"), "Unlisted languages must use the keep default");
+languageRule.DefaultUpdateDisplayTitle = true;
+Check(OriginalTitlePolicy.ShouldUpdateDisplayTitle(languageRule, "en"), "Unlisted known languages may use original titles");
+Check(!OriginalTitlePolicy.ShouldUpdateDisplayTitle(languageRule, "ja"), "Explicit keep must override the default action");
+foreach (var unknown in new string?[] { null, "", "xx", "und", "polish", "12" })
+    Check(!OriginalTitlePolicy.ShouldUpdateDisplayTitle(languageRule, unknown), "Missing/invalid source language must keep titles even with default update");
+languageRule.LanguageRules.Add(new() { Language = "pl", UpdateDisplayTitle = false });
+Check(!OriginalTitlePolicy.ShouldUpdateDisplayTitle(languageRule, "pl"), "Conflicting duplicate decisions must keep the current title");
+languageRule.LanguageRules.RemoveAt(2);
+languageRule.DefaultUpdateDisplayTitle = false;
+config.Libraries[0].Rules = new() { languageRule };
+config.OriginalTitleApprovedScopes.Clear();
+config.OriginalTitleApprovals.Clear();
+items.Clear();
+var languageHandler = new SourceLanguageHandler();
+var languageClient = new TmdbLocalizedClient(new ClientFactory(languageHandler), NullLogger<TmdbLocalizedClient>.Instance);
+var languageApplier = new FieldLangApplier(library, languageClient, NullLogger<FieldLangApplier>.Instance);
+TestMovie LanguageMovie(string id, string original)
+{
+    var movie = new TestMovie { Id = Guid.NewGuid(), Name = "English " + id, OriginalTitle = original, Overview = "Keep description" };
+    movie.SetProviderId(MetadataProvider.Tmdb, id);
+    items.Add(movie);
+    return movie;
+}
+var conditionalPolish = LanguageMovie("2001", "Polski tytuł");
+var conditionalJapanese = LanguageMovie("2002", "日本語");
+var conditionalEnglish = LanguageMovie("2003", "English original");
+var conditionalUnknown = LanguageMovie("2004", "Unknown original");
+var conditionalTimeout = LanguageMovie("2005", "Timeout original");
+var conditionalNoProvider = new TestMovie { Id = Guid.NewGuid(), Name = "Unidentified", OriginalTitle = "Local original" };
+items.Add(conditionalNoProvider);
+dryRun = (OkObjectResult)(await controller.DryRunOriginalTitles(languageApplier, default)).Result!;
+json = System.Text.Json.JsonSerializer.SerializeToElement(dryRun.Value);
+token = json.GetProperty("Token").GetString()!;
+Check(json.GetProperty("WouldChange").GetInt32() == 1 && items.Cast<TestMovie>().All(m => m.Writes == 0),
+    "Conditional preview must only offer the Polish film and write no metadata");
+var rejectedSample = await controller.ApproveOriginalTitles(new() { Token = token, ItemIds = new() { conditionalJapanese.Id.ToString("N") } }, languageApplier, default);
+Check(rejectedSample.Result is BadRequestObjectResult, "Excluded language rows cannot be approved as samples");
+await controller.ApproveOriginalTitles(new() { Token = token, ApproveLibraries = true }, languageApplier, default);
+Check(await languageApplier.ApplyAsync(conditionalPolish, default) && conditionalPolish.Name == "Polski tytuł"
+    && conditionalPolish.Overview == "Keep description", "Approved language rules must change only the matching display title");
+foreach (var excluded in new[] { conditionalJapanese, conditionalEnglish, conditionalUnknown, conditionalTimeout, conditionalNoProvider })
+    Check(!await languageApplier.ApplyAsync(excluded, default) && excluded.Writes == 0 && excluded.LockedFields.Length == 0,
+        "Excluded/unknown/failed source languages must not create title locks or backups");
+var futurePolish = LanguageMovie("2007", "Nowy polski film");
+Check(await languageApplier.ApplyAsync(futurePolish, default) && futurePolish.Name == "Nowy polski film",
+    "Approved language rules must automatically apply to a later import");
+Check(!await languageApplier.ApplyAsync(futurePolish, default) && futurePolish.Writes == 1,
+    "Conditional title sweeps must be idempotent");
+var driftMovie = LanguageMovie("2007", "Do not apply stale source language");
+languageHandler.BeforeResponse = () => driftMovie.SetProviderId(MetadataProvider.Tmdb, "2002");
+languageClient.ClearCache();
+Check(!await languageApplier.ApplyAsync(driftMovie, default) && driftMovie.Writes == 0 && driftMovie.Name == "English 2007",
+    "Provider corrections during a source-language lookup must discard the stale eligibility result");
+languageHandler.BeforeResponse = null;
+var normalizedSave = System.Text.Json.JsonSerializer.Deserialize<PluginConfiguration>(System.Text.Json.JsonSerializer.Serialize(config))!;
+normalizedSave.Libraries[0].Rules[0].LanguageRules.Reverse();
+normalizedSave.Libraries[0].Rules[0].LanguageRules.Single(r => r.UpdateDisplayTitle).Language = "pl";
+plugin.UpdateConfiguration(normalizedSave);
+config = plugin.Configuration;
+Check(config.OriginalTitleApprovedScopes.Count == 1, "Equivalent reordered/normalized rules must retain approval");
+var broadened = System.Text.Json.JsonSerializer.Deserialize<PluginConfiguration>(System.Text.Json.JsonSerializer.Serialize(config))!;
+broadened.Libraries[0].Rules[0].DefaultUpdateDisplayTitle = true;
+plugin.UpdateConfiguration(broadened);
+config = plugin.Configuration;
+Check(config.OriginalTitleApprovedScopes.Count == 0 && !await languageApplier.ApplyAsync(conditionalEnglish, default),
+    "Changing language decisions must revoke old approvals before enabling other languages");
+var oldReview = await controller.ApproveOriginalTitles(new() { Token = token, ApproveLibraries = true }, languageApplier, default);
+Check(oldReview.Result is ConflictObjectResult, "Language condition edits must invalidate old preview tokens");
+dryRun = (OkObjectResult)(await controller.DryRunOriginalTitles(languageApplier, default)).Result!;
+json = System.Text.Json.JsonSerializer.SerializeToElement(dryRun.Value);
+await controller.ApproveOriginalTitles(new() { Token = json.GetProperty("Token").GetString()!, ApproveLibraries = true }, languageApplier, default);
+Check(await languageApplier.ApplyAsync(conditionalEnglish, default), "Reapproved other-language update action must apply to known languages");
+Check(!await languageApplier.ApplyAsync(conditionalUnknown, default) && !await languageApplier.ApplyAsync(conditionalJapanese, default),
+    "Unknown language and explicit keep remain excluded even after approving the update default");
+plugin = new Plugin(paths, serializer);
+config = plugin.Configuration;
+Check(config.Libraries[0].Rules[0].UseLanguageRules && config.Libraries[0].Rules[0].LanguageRules.Count == 2,
+    "Language conditions must survive XML serialization and plugin restart");
+var conditionalBackup = config.OriginalTitleBackups.Single(b => b.ItemId == conditionalPolish.Id.ToString("N"));
+Check(conditionalBackup.OriginalName == "English 2001", "Conditional titles must retain the existing rollback journal");
+var rollbackConditional = (OkObjectResult)(await controller.RollbackOriginalTitles(default)).Result!;
+Check(conditionalPolish.Name == "English 2001" && !conditionalPolish.LockedFields.Contains(MetadataField.Name),
+    "Rollback must restore a language-filtered title and release only the plugin title lock");
 Console.WriteLine($"Passed {passed} safety checks.");
 
 public class Stub<T> : DispatchProxy where T : class
@@ -657,6 +753,23 @@ public sealed class CallbackTmdbHandler(Action<int> callback) : HttpMessageHandl
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent("{\"title\":\"Localized during lookup\",\"overview\":\"Fetched description\",\"original_title\":\"Fetched original\"}")
+        });
+    }
+}
+
+public sealed class SourceLanguageHandler : HttpMessageHandler
+{
+    public Action? BeforeResponse { get; set; }
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var id = request.RequestUri!.Segments.Last();
+        BeforeResponse?.Invoke();
+        if (id == "2005") return Task.FromException<HttpResponseMessage>(new TaskCanceledException("TMDb timeout"));
+        var language = id switch { "2001" or "2007" => "pl", "2002" => "ja", "2003" => "en", _ => null };
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(new { original_language = language })),
         });
     }
 }

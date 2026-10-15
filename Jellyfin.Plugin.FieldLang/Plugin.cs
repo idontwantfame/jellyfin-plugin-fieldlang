@@ -63,12 +63,17 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         }
     }
 
-    internal static string OriginalTitleScope(string libraryId, string itemType) =>
-        libraryId.Replace("-", string.Empty, StringComparison.Ordinal).ToLowerInvariant() + ":" + itemType;
+    internal static string OriginalTitleScope(string libraryId, string itemType, FieldLanguageRule rule)
+    {
+        var scope = libraryId.Replace("-", string.Empty, StringComparison.Ordinal).ToLowerInvariant() + ":" + itemType;
+        var conditions = OriginalTitlePolicy.LanguageRuleIdentity(rule);
+        return conditions.Length == 0 ? scope : scope + ":" + Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(conditions)));
+    }
 
-    private static HashSet<string> GetOriginalTitleScopes(PluginConfiguration config) => config.Libraries
+    internal static HashSet<string> GetOriginalTitleScopes(PluginConfiguration config) => config.Libraries
         .SelectMany(l => l.Rules.Where(r => r.Field == "OriginalTitle" && r.ItemType is "Movie" or "Series")
-            .Select(r => OriginalTitleScope(l.LibraryId, r.ItemType)))
+            .Select(r => OriginalTitleScope(l.LibraryId, r.ItemType, r)))
         .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>Initializes a new instance of the <see cref="Plugin"/> class.</summary>

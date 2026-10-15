@@ -7,6 +7,8 @@
     <FileVersion>2.3.0.0</FileVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Keep developer machine paths out of the DLL's embedded debug metadata. -->
+    <PathMap>$(MSBuildProjectDirectory)=/_/FieldLang</PathMap>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <RootNamespace>Jellyfin.Plugin.FieldLang</RootNamespace>
     <!-- Config page + any future static assets are shipped inside the DLL. -->

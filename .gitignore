@@ -5,4 +5,5 @@ obj/
 .idea/
 CLAUDE.md
 dist/
+dist-*/
 __pycache__/

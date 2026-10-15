@@ -241,6 +241,9 @@ docker run --rm -v "$PWD":/src -w /src mcr.microsoft.com/dotnet/sdk:10.0 \
 
 Output lands in `Jellyfin.Plugin.FieldLang/bin/Release/net10.0/`.
 
+Local builds map source paths to `/_/FieldLang` so the DLL's debug metadata does not expose the
+developer's home directory. Generated `dist/` and `dist-*/` release folders are ignored by Git.
+
 Run the executable regression suite (no additional test framework required):
 
 ```bash

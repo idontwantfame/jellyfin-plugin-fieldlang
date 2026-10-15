@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.3.0.0 — Unreleased
+## 2.3.0.0
 
 - Add a generic translated-title action to each source-language rule and the default action.
   Choose any two-letter target language with an optional region, such as en, pl or pt-BR.
@@ -11,6 +11,16 @@
   no translated-title actions are configured. Reuse title backups, manual-edit protection and rollback.
 - Cover native/translated/keep combinations, future imports, regional fallback, missing translations,
   concurrent provider corrections, transient failures, cancellation, XML reloads and target approval changes.
+
+<!-- generated-commit-changelog -->
+
+### Commits since v2.1.0.0
+
+- docs: prepare installation instructions for the 2.3 release ([817f7d2](https://github.com/idontwantfame/jellyfin-plugin-fieldlang/commit/817f7d2cf4529873524209f535b9108576c83ae9))
+- build: anonymize source paths in local release assemblies ([b391c94](https://github.com/idontwantfame/jellyfin-plugin-fieldlang/commit/b391c941fd9606cd7f65ffa2a7cf82ca0537da76))
+- feat: support generic source-to-target title rules ([e499495](https://github.com/idontwantfame/jellyfin-plugin-fieldlang/commit/e499495d99636d694412cd01b0f69ac2e99b1319))
+- feat: add original-language rules for display titles ([3ed5aba](https://github.com/idontwantfame/jellyfin-plugin-fieldlang/commit/3ed5abaa9a25e112f5210b1bd9e04a61075900e1))
+- chore: publish catalogue entry for v2.1.0.0 ([f1c1a9e](https://github.com/idontwantfame/jellyfin-plugin-fieldlang/commit/f1c1a9e410ce94ef549a485e2effc005e68c1fcf))
 
 ## 2.2.0.0 — Unreleased
 

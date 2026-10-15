@@ -145,11 +145,10 @@ Jellyfin administrator authentication. No external metadata or media sidecar fil
 
 ## Install
 
-### Current source build (2.3.0.0)
+### Build from source (2.3.0.0)
 
-The repository catalogue currently offers 2.1.0.0. Until 2.3.0.0 is published, adding its URL
-will **not** install the new display-title language rules.
-Use the following manual steps or download a tested ZIP from a successful Actions build.
+For normal installation, use the published releases and Jellyfin catalogue below. To try an
+unreleased source build, follow these manual steps or download a tested Actions artifact.
 
 1. Build the DLL using the commands in [Build](#build).
 2. Stop Jellyfin and back up its server data/appdata, including the plugin configuration containing
@@ -183,7 +182,9 @@ second independent plugin. Do not leave multiple active copies installed. Histor
 entries still point to the original author's release assets; new releases point to this fork.
 
 Either way, finish in Dashboard → Plugins → Field Language: paste your TMDb key, expand a library,
-put a language code next to the fields you want, save.
+and configure the fields you want. For display titles, enable **Display title rules**, choose source
+languages and actions/targets, save, preview, and approve the reviewed rules and future imports.
+For descriptions and other per-field rules, enter the desired metadata language and save.
 
 Rules are applied by the **Apply per-field metadata languages** scheduled task, which runs daily.
 Run it from Dashboard → Scheduled Tasks to apply a change immediately.

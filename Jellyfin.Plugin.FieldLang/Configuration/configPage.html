@@ -81,8 +81,8 @@
                     puts it back on the next run &mdash; still correct, but the wrong language is visible
                     in between. Tagline has no lock in Jellyfin, so it always works the second way.
                     <br /><br />
-                    <strong>Original title</strong> is different: enable its checkbox instead of entering a
-                    language. For each movie or series Field Language uses Jellyfin's populated
+                    <strong>Display title rules</strong> are different: enable the checkbox instead of entering a
+                    language. For original-title actions, Field Language uses Jellyfin's populated
                     OriginalTitle, falling back to TMDb's original title/name. It changes the server
                     title seen by all clients, preserves an explicit sort title, and stops managing an
                     item if it later detects a manual title edit.
@@ -92,11 +92,15 @@
                     <br /><br />
                     <strong>Display-title language rules</strong> can limit original titles to selected
                     source languages: for example Polish (<code>pl</code>) uses the original title while
-                    Japanese (<code>ja</code>) keeps the current title. Choose what happens for other
+                    Japanese (<code>ja</code>) uses an English title or keeps the current title. Choose what happens for other
                     languages. Unknown languages and failed lookups always keep the current title.
                     These rules use the film or series' original language from TMDb, not dubbed audio.
                     Changing a condition requires a new preview and approval. Keeping a title stops
                     future changes; use rollback to restore titles already changed.
+                    <strong>Use translated title</strong> lets you choose any target language code,
+                    such as <code>en</code>, <code>pl</code> or <code>pt-BR</code>. A region is a preference;
+                    another translation in the same language can be used if needed. If no title in
+                    the chosen language is available, the current title is kept.
                 </div>
 
                 <div id="FieldLangRules"></div>
@@ -109,17 +113,17 @@
             </form>
 
             <div style="margin-top:2em;">
-                <h3>Original-title safety tools</h3>
+                <h3>Display-title preview and rollback</h3>
                 <div class="fieldDescription">
                     Save the rule first, then run a dry-run before the scheduled task. It makes no
                     metadata changes and lists the current server title, proposed title, and source.
                     Rollback restores only titles still owned by Field Language; later manual edits are skipped.
                 </div>
                 <button is="emby-button" type="button" id="btnOriginalTitleDryRun" class="raised emby-button">
-                    <span>Dry-run original titles</span>
+                    <span>Dry-run display titles</span>
                 </button>
                 <button is="emby-button" type="button" id="btnOriginalTitleRollback" class="emby-button">
-                    <span>Rollback original titles</span>
+                    <span>Rollback display titles</span>
                 </button>
                 <button is="emby-button" type="button" id="btnOriginalTitleSamples" class="emby-button" disabled>
                     <span>Apply selected samples</span>
@@ -151,19 +155,33 @@
                     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
             }
 
+            function titleAction(original, target) {
+                return original && target ? 'no' : original ? 'yes' : target ? 'translate' : 'no';
+            }
+
+            function targetInput(value, attribute) {
+                return '<input is="emby-input" class="fieldLangInput" type="text" ' + attribute
+                    + ' aria-label="Target title language" list="FieldLangSourceLanguages" placeholder="en"'
+                    + ' pattern="[A-Za-z]{2}(-[A-Za-z]{2})?" maxlength="5" required value="' + esc(value || 'en') + '" />';
+            }
+
             function languageRow(rule) {
+                var action = titleAction(rule.UpdateDisplayTitle, rule.TitleLanguage);
                 return '<div class="fieldLangLanguageRow">'
                     + '<input is="emby-input" class="fieldLangInput" data-source-language type="text"'
                     + ' aria-label="Original language code" list="FieldLangSourceLanguages" placeholder="pl" pattern="[A-Za-z]{2}" maxlength="2" required'
                     + ' value="' + esc(rule.Language) + '" />'
                     + '<select is="emby-select" data-language-action aria-label="Display title action">'
-                    + '<option value="yes"' + (rule.UpdateDisplayTitle ? ' selected' : '') + '>Use original title</option>'
-                    + '<option value="no"' + (!rule.UpdateDisplayTitle ? ' selected' : '') + '>Keep current title</option></select>'
+                    + '<option value="yes"' + (action === 'yes' ? ' selected' : '') + '>Use original title</option>'
+                    + '<option value="no"' + (action === 'no' ? ' selected' : '') + '>Keep current title</option>'
+                    + '<option value="translate"' + (action === 'translate' ? ' selected' : '') + '>Use translated title</option></select>'
+                    + targetInput(rule.TitleLanguage, 'data-title-target')
                     + '<button type="button" is="emby-button" class="emby-button" data-remove-language>Remove</button></div>';
             }
 
             function languageRules(lib, type, rule) {
                 var filtered = rule ? rule.UseLanguageRules === true : true;
+                var defaultAction = rule ? titleAction(rule.DefaultUpdateDisplayTitle, rule.DefaultTitleLanguage) : 'no';
                 var rows = rule ? (rule.LanguageRules || []) : [
                     { Language: 'pl', UpdateDisplayTitle: true }, { Language: 'ja', UpdateDisplayTitle: false }
                 ];
@@ -178,8 +196,10 @@
                     + '<button type="button" is="emby-button" class="emby-button" data-add-language>Add language</button>'
                     + '<label class="fieldLangLanguageRow">Other known languages '
                     + '<select is="emby-select" data-default-language-action>'
-                    + '<option value="no"' + (!rule || !rule.DefaultUpdateDisplayTitle ? ' selected' : '') + '>Keep current title</option>'
-                    + '<option value="yes"' + (rule && rule.DefaultUpdateDisplayTitle ? ' selected' : '') + '>Use original title</option></select></label>'
+                    + '<option value="no"' + (defaultAction === 'no' ? ' selected' : '') + '>Keep current title</option>'
+                    + '<option value="yes"' + (defaultAction === 'yes' ? ' selected' : '') + '>Use original title</option>'
+                    + '<option value="translate"' + (defaultAction === 'translate' ? ' selected' : '') + '>Use translated title</option></select>'
+                    + targetInput(rule && rule.DefaultTitleLanguage, 'data-default-title-target') + '</label>'
                     + '</div><div class="fieldLangNote">Existing title locks, manual edits, backups and rollback are preserved. '
                     + 'With language conditions off, this rule uses original titles for all languages.</div></div>';
             }
@@ -249,7 +269,7 @@
                                         + ' data-library-name="' + esc(lib.Name) + '"'
                                         + ' data-type="' + esc(type.Name) + '"'
                                         + ' data-field="' + esc(field.Name) + '"'
-                                        + (rule ? ' checked' : '') + ' /><span>use each item\'s original title</span></label>')
+                                        + (rule ? ' checked' : '') + ' /><span>enable display-title rules</span></label>')
                                 + (field.Lockable
                                     ? '<label class="fieldLangLock"><input is="emby-checkbox" type="checkbox"'
                                         + ' data-lock-for="' + esc(lib.Id + '|' + type.Name + '|' + field.Name) + '"'
@@ -287,6 +307,11 @@
                         section.querySelector('.fieldLangLanguageOptions').hidden = !filtered;
                         section.querySelectorAll('[data-source-language], [data-language-action], [data-default-language-action]')
                             .forEach(function (control) { control.disabled = !enabled || !filtered; });
+                        section.querySelectorAll('[data-title-target], [data-default-title-target]').forEach(function (control) {
+                            var action = control.parentElement.querySelector('[data-language-action], [data-default-language-action]');
+                            control.hidden = action.value !== 'translate';
+                            control.disabled = !enabled || !filtered || control.hidden;
+                        });
                     });
                 }
                 syncLanguageControls();
@@ -391,12 +416,16 @@
                         var section = container.querySelector('[data-language-rules="' + id + '|' + type + '"]');
                         rule.UseLanguageRules = section.querySelector('[data-use-language-rules]').checked;
                         rule.DefaultUpdateDisplayTitle = section.querySelector('[data-default-language-action]').value === 'yes';
+                        rule.DefaultTitleLanguage = section.querySelector('[data-default-language-action]').value === 'translate'
+                            ? section.querySelector('[data-default-title-target]').value.trim().toLowerCase() : '';
                         rule.LanguageRules = [];
                         section.querySelectorAll('.fieldLangLanguageRow').forEach(function (row) {
                             var code = row.querySelector('[data-source-language]');
                             if (code && code.value.trim()) {
                                 rule.LanguageRules.push({ Language: code.value.trim().toLowerCase(),
-                                    UpdateDisplayTitle: row.querySelector('[data-language-action]').value === 'yes' });
+                                    UpdateDisplayTitle: row.querySelector('[data-language-action]').value === 'yes',
+                                    TitleLanguage: row.querySelector('[data-language-action]').value === 'translate'
+                                        ? row.querySelector('[data-title-target]').value.trim().toLowerCase() : '' });
                             }
                         });
                     }
@@ -499,7 +528,7 @@
                     Dashboard.alert('Select a few reviewed items first.');
                     return;
                 }
-                if (libraries && !window.confirm('Allow the scheduled task to apply original titles to these reviewed libraries, including future imports?')) {
+                if (libraries && !window.confirm('Allow the scheduled task to apply these reviewed display-title rules, including future imports?')) {
                     return;
                 }
                 Dashboard.showLoadingMsg();

@@ -240,8 +240,8 @@ public sealed class FieldLangApplier
             candidate.Title,
             string.Equals(item.Name, candidate.Title, StringComparison.Ordinal)
                 ? backup is null
-                    ? $"already the original title ({candidate.Source}); will record ownership and lock title"
-                    : $"already the original title ({candidate.Source})"
+                    ? $"already the requested title ({candidate.Source}); will record ownership and lock title"
+                    : $"already the requested title ({candidate.Source})"
                 : candidate.Source,
             backup is null || backup.PendingWrite || !string.Equals(item.Name, candidate.Title, StringComparison.Ordinal));
     }
@@ -366,10 +366,23 @@ public sealed class FieldLangApplier
             if (LookupIdentity(item) != identity || item.OriginalTitle != originalBefore)
                 return (null, "source metadata changed during language lookup; run another dry-run");
             var language = OriginalTitlePolicy.NormalizeLanguage(fields?.OriginalLanguage);
-            if (!OriginalTitlePolicy.ShouldUpdateDisplayTitle(rule, language))
+            var decision = OriginalTitlePolicy.GetDisplayTitleDecision(rule, language);
+            if (decision.Action == DisplayTitleAction.Keep)
                 return (null, language.Length == 0
                     ? "original language unavailable; keeping current title"
                     : $"original language {language}: keep current title");
+            if (decision.Action == DisplayTitleAction.Localized)
+            {
+                var translationId = item.GetProviderId(MetadataProvider.Tmdb);
+                if (string.IsNullOrWhiteSpace(translationId)) return (null, "no TMDb provider id for translated title");
+                var translated = await _tmdb.GetTranslatedTitleAsync(translationId,
+                    itemType == FieldCatalog.Series, decision.Language, cancellationToken).ConfigureAwait(false);
+                if (LookupIdentity(item) != identity || item.OriginalTitle != originalBefore)
+                    return (null, "source metadata changed during translated-title lookup; run another dry-run");
+                return OriginalTitlePolicy.IsValidTitle(translated)
+                    ? (translated, $"original language {language}: use {decision.Language} title (TMDb translation)")
+                    : (null, $"original language {language}: {decision.Language} title unavailable; keeping current title");
+            }
             source = $"; original language {language}: use original title";
         }
         // Jellyfin's provider may already have captured this. It is preferable because it is

@@ -47,6 +47,7 @@ public sealed class TmdbLocalizedClient
     // repeatedly (once per episode), so this collapses a lot of identical requests.
     private readonly ConcurrentDictionary<string, LocalizedFields?> _cache = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string?> _originalTitleCache = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string?> _translatedTitleCache = new(StringComparer.Ordinal);
 
     /// <summary>Initializes a new instance of the <see cref="TmdbLocalizedClient"/> class.</summary>
     /// <param name="httpClientFactory">HTTP client factory.</param>
@@ -62,6 +63,54 @@ public sealed class TmdbLocalizedClient
     {
         _cache.Clear();
         _originalTitleCache.Clear();
+        _translatedTitleCache.Clear();
+    }
+
+    /// <summary>Reads an explicit translated title in a chosen language, with an optional preferred region.</summary>
+    public async Task<string?> GetTranslatedTitleAsync(string tmdbId, bool series, string language, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var path = $"{(series ? "tv" : "movie")}/{tmdbId}/translations";
+        var target = OriginalTitlePolicy.NormalizeLanguage(language).Split('-');
+        if (target.Length > 2 || target.Any(p => p.Length != 2 || !p.All(char.IsAsciiLetter))) return null;
+        var region = target.Length == 2 ? target[1].ToUpperInvariant()
+            : target[0] == "en" ? "GB" : target[0].ToUpperInvariant();
+        var key = path + ":" + string.Join('-', target);
+        if (_translatedTitleCache.TryGetValue(key, out var cached)) return cached;
+        var apiKey = Plugin.Instance?.Configuration.TmdbApiKey;
+        if (string.IsNullOrWhiteSpace(apiKey)) return null;
+        try
+        {
+            using var response = await _http.GetAsync(
+                $"{BaseUrl}/{path}?api_key={Uri.EscapeDataString(apiKey)}", cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                _translatedTitleCache[key] = null;
+                return null;
+            }
+            if (response.StatusCode == HttpStatusCode.TooManyRequests) return null;
+            response.EnsureSuccessStatusCode();
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (!doc.RootElement.TryGetProperty("translations", out var translations)
+                || translations.ValueKind != JsonValueKind.Array) return null;
+            var title = translations.EnumerateArray()
+                .Where(t => ReadString(t, "iso_639_1") == target[0])
+                .OrderBy(t => ReadString(t, "iso_3166_1") == region ? 0
+                    : target[0] == "en" && ReadString(t, "iso_3166_1") == "US" ? 1 : 2)
+                .ThenBy(t => ReadString(t, "iso_3166_1"), StringComparer.Ordinal)
+                .Select(t => t.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object
+                    ? ReadString(data, series ? "name" : "title") : null)
+                .FirstOrDefault(OriginalTitlePolicy.IsValidTitle);
+            _translatedTitleCache[key] = title;
+            return title;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "TMDb translated-title lookup failed for {Path} in {Language}", path, language);
+            return null;
+        }
     }
 
     /// <summary>Fetches TMDb's language-independent original title for a movie.</summary>

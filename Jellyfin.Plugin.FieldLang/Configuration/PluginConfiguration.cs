@@ -36,6 +36,9 @@ public class FieldLanguageRule
     /// <summary>Gets or sets the action for known original languages without an explicit rule.</summary>
     public bool DefaultUpdateDisplayTitle { get; set; }
 
+    /// <summary>Gets or sets a target title language for unlisted known source languages.</summary>
+    public string DefaultTitleLanguage { get; set; } = string.Empty;
+
     /// <summary>Gets or sets original-language decisions for the display title.</summary>
     public List<OriginalLanguageRule> LanguageRules { get; set; } = new();
 }
@@ -48,6 +51,9 @@ public class OriginalLanguageRule
 
     /// <summary>Gets or sets whether matching items should use their original display title.</summary>
     public bool UpdateDisplayTitle { get; set; }
+
+    /// <summary>Gets or sets a target title language, such as en, pl or pt-BR. Empty keeps the current title.</summary>
+    public string TitleLanguage { get; set; } = string.Empty;
 }
 
 /// <summary>

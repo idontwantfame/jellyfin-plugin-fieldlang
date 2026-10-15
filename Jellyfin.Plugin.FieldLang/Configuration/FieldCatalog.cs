@@ -59,7 +59,7 @@ public static class FieldCatalog
     /// localized TMDb payload, because each item chooses its own source language.
     /// </summary>
     private static readonly LocalizableField _originalTitle = new(
-        "OriginalTitle", "Original title", MetadataField.Name,
+        "OriginalTitle", "Display title rules", MetadataField.Name,
         (_, _) => false,
         RequiresLanguage: false);
 

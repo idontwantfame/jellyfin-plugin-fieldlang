@@ -26,6 +26,26 @@ than blanked.
 
 ## Original titles
 
+### Generic source-to-target title rules (2.3.0.0)
+
+Under Rules, choose an action for each original source language: Keep current title, Use original
+ title, or Use translated title. Translated titles accept any supported two-letter TMDb target
+language, optionally with a region: `en`, `pl`, `fr`, `ja`, `pt-BR`. The default action has the same
+choices for unlisted known sources. For example, keep English-source titles, use Polish originals,
+translate Japanese to English, or translate French to Polish. Every administrator can choose their
+own source/target combinations.
+
+Translations are read explicitly from TMDb's translation records. A missing translation leaves the
+current title alone; a provider fallback in another language is not used as a translation. A region
+selects the preferred translation, with other regions of that same language as fallback. Bare `en`
+prefers GB then US. Original-title actions still prefer the server's own OriginalTitle. Unknown
+source languages always keep the current title.
+
+Save, preview and approve once to cover later imports on scheduled runs. Changing an action or target
+invalidates the affected approval. Existing 2.2 approvals are retained when no translation targets
+are configured. Native and translated actions share durable backups, manual-edit protections and
+rollback. Descriptions, audio preferences and media filenames are unaffected.
+
 ### Display-title language rules (2.2.0.0)
 
 Under **Rules → your library → Movie/Series → Original title**, enable **Choose by original
@@ -125,9 +145,9 @@ Jellyfin administrator authentication. No external metadata or media sidecar fil
 
 ## Install
 
-### Current source build (2.2.0.0)
+### Current source build (2.3.0.0)
 
-The repository catalogue currently offers 2.1.0.0. Until 2.2.0.0 is published, adding its URL
+The repository catalogue currently offers 2.1.0.0. Until 2.3.0.0 is published, adding its URL
 will **not** install the new display-title language rules.
 Use the following manual steps or download a tested ZIP from a successful Actions build.
 
@@ -138,7 +158,7 @@ Use the following manual steps or download a tested ZIP from a successful Action
    the exact path depends on the container image and its configuration.
 4. Move existing Field Language version folders outside `plugins` as a backup. Preserve its
    configuration XML; do not delete the plugin configuration directory.
-5. Create `Field Language_2.2.0.0` inside `plugins` and copy
+5. Create `Field Language_2.3.0.0` inside `plugins` and copy
    `Jellyfin.Plugin.FieldLang/bin/Release/net10.0/Jellyfin.Plugin.FieldLang.dll` into it.
    Copy only this plugin DLL, not Jellyfin's own DLLs from the build output. Ensure the Jellyfin
    container user can read the folder and DLL.
@@ -239,7 +259,7 @@ and unrelated field locks added during those lookups, plus rule reapproval durin
 Temporary test files are removed when the test process finishes normally.
 This suite does not replace live Jellyfin 12.1/Neptune validation on the target server.
 
-The working build is **2.2.0.0**, described in [CHANGELOG.md](CHANGELOG.md). The repository manifest
+The working build is **2.3.0.0**, described in [CHANGELOG.md](CHANGELOG.md). The repository manifest
 continues to list existing published releases until the release workflow publishes new assets.
 
 ## GitHub builds and releases
@@ -257,7 +277,7 @@ To publish after sample validation:
 2. Open **Actions → Build and release → Run workflow**, select `main`, and check `publish`.
    Leaving it unchecked builds an artifact without creating a release or editing the catalogue.
 3. Alternatively, push a tag matching the project's four-part assembly version, such as
-   `v2.2.0.0`. A tag mismatch fails packaging instead of publishing a mislabeled DLL.
+   `v2.3.0.0`. A tag mismatch fails packaging instead of publishing a mislabeled DLL.
 4. The workflow publishes the ZIP, MD5/SHA-256 checksums, and a catalogue manifest to
    [Releases](https://github.com/idontwantfame/jellyfin-plugin-fieldlang/releases). It then updates
    `manifest.json` and `CHANGELOG.md` on `main`. Release notes include the hand-written highlights
@@ -283,7 +303,7 @@ Local release-tooling checks and packaging (Python 3.10+; use a fresh output dir
 ```bash
 python3 -m unittest discover -s tests -p 'test_release.py' -v
 python3 scripts/release.py package --output dist \
-  --repository idontwantfame/jellyfin-plugin-fieldlang --tag v2.2.0.0 --commit HEAD
+  --repository idontwantfame/jellyfin-plugin-fieldlang --tag v2.3.0.0 --commit HEAD
 ```
 
 ## Prior art

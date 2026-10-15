@@ -659,6 +659,109 @@ Check(conditionalBackup.OriginalName == "English 2001", "Conditional titles must
 var rollbackConditional = (OkObjectResult)(await controller.RollbackOriginalTitles(default)).Result!;
 Check(conditionalPolish.Name == "English 2001" && !conditionalPolish.LockedFields.Contains(MetadataField.Name),
     "Rollback must restore a language-filtered title and release only the plugin title lock");
+// Generic source -> target title rules share the same approval, lock and rollback protections.
+var translatedRule = new FieldLanguageRule
+{
+    ItemType = "Movie", Field = "OriginalTitle", UseLanguageRules = true, DefaultTitleLanguage = "en",
+    LanguageRules = new()
+    {
+        new() { Language = "pl", UpdateDisplayTitle = true },
+        new() { Language = "en" },
+        new() { Language = "fr", TitleLanguage = " PL " },
+        new() { Language = "ja", TitleLanguage = "en" },
+        new() { Language = "es", TitleLanguage = "pt-BR" },
+    },
+};
+Check(OriginalTitlePolicy.GetDisplayTitleDecision(translatedRule, "fr") == (DisplayTitleAction.Localized, "pl"),
+    "Source and target languages must be independent and normalized");
+Check(OriginalTitlePolicy.GetDisplayTitleAction(translatedRule, "pl") == DisplayTitleAction.Original
+    && OriginalTitlePolicy.GetDisplayTitleAction(translatedRule, "en") == DisplayTitleAction.Keep,
+    "Polish original and English keep rules must override the translated-title default");
+Check(OriginalTitlePolicy.GetDisplayTitleDecision(translatedRule, "ko") == (DisplayTitleAction.Localized, "en")
+    && OriginalTitlePolicy.GetDisplayTitleAction(translatedRule, null) == DisplayTitleAction.Keep,
+    "Unlisted known languages may translate while unknown languages remain untouched");
+translatedRule.LanguageRules.Add(new() { Language = "fr", TitleLanguage = "en" });
+Check(OriginalTitlePolicy.GetDisplayTitleAction(translatedRule, "fr") == DisplayTitleAction.Keep,
+    "Conflicting target languages must keep the current title");
+translatedRule.LanguageRules.RemoveAt(translatedRule.LanguageRules.Count - 1);
+translatedRule.LanguageRules.Add(new() { Language = "de", TitleLanguage = "invalid" });
+Check(OriginalTitlePolicy.GetDisplayTitleAction(translatedRule, "de") == DisplayTitleAction.Keep,
+    "Malformed target languages must never trigger title changes");
+translatedRule.LanguageRules.RemoveAt(translatedRule.LanguageRules.Count - 1);
+config.Libraries[0].Rules = new() { translatedRule, new()
+{
+    ItemType = "Series", Field = "OriginalTitle", UseLanguageRules = true, DefaultTitleLanguage = "en",
+} };
+config.OriginalTitleApprovedScopes.Clear();
+items.Clear();
+var translationHandler = new TranslationHandler();
+var translationClient = new TmdbLocalizedClient(new ClientFactory(translationHandler), NullLogger<TmdbLocalizedClient>.Instance);
+var translationApplier = new FieldLangApplier(library, translationClient, NullLogger<FieldLangApplier>.Instance);
+var keepPolish = LanguageMovie("3001", "Polski oryginał");
+var toEnglish = LanguageMovie("3002", "日本語");
+var frenchToPolish = LanguageMovie("3003", "Titre français");
+var keepEnglish = LanguageMovie("3004", "English original");
+var missingEnglish = LanguageMovie("3005", "Deutscher Titel");
+var defaultEnglish = LanguageMovie("3006", "Chinese original");
+var spanishToPortuguese = LanguageMovie("3007", "Título original");
+var translatedSeries = new TestSeries { Id = Guid.NewGuid(), Name = "Old series title", OriginalTitle = "原題" };
+translatedSeries.SetProviderId(MetadataProvider.Tmdb, "3008");items.Add(translatedSeries);
+dryRun = (OkObjectResult)(await controller.DryRunOriginalTitles(translationApplier, default)).Result!;
+json = System.Text.Json.JsonSerializer.SerializeToElement(dryRun.Value);
+Check(items.OfType<TestMovie>().All(m => m.Writes == 0) && translatedSeries.Writes == 0,
+    "Generic title previews must be read-only for movies and series");
+await controller.ApproveOriginalTitles(new() { Token = json.GetProperty("Token").GetString()!, ApproveLibraries = true }, translationApplier, default);
+Check(await translationApplier.ApplyAsync(keepPolish, default) && keepPolish.Name == "Polski oryginał",
+    "A native-title action must remain available alongside translations");
+Check(await translationApplier.ApplyAsync(toEnglish, default) && toEnglish.Name == "English GB",
+    "An English target must prefer an explicit GB translation over US");
+Check(await translationApplier.ApplyAsync(frenchToPolish, default) && frenchToPolish.Name == "Polskie tłumaczenie",
+    "A French source must support a Polish target without changing descriptions");
+Check(frenchToPolish.Overview == "Keep description" && !await translationApplier.ApplyAsync(keepEnglish, default)
+    && keepEnglish.Name == "English 3004" && keepEnglish.LockedFields.Length == 0,
+    "Generic title rules must preserve descriptions and explicitly excluded English items");
+Check(!await translationApplier.ApplyAsync(missingEnglish, default) && missingEnglish.Writes == 0
+    && missingEnglish.LockedFields.Length == 0,
+    "Missing English translations must preserve the title instead of using a source-language fallback");
+Check(await translationApplier.ApplyAsync(defaultEnglish, default) && defaultEnglish.Name == "English US",
+    "Unlisted source languages must use the configured default target with regional fallback");
+Check(await translationApplier.ApplyAsync(spanishToPortuguese, default) && spanishToPortuguese.Name == "Título brasileiro",
+    "An explicit target region must take precedence over other translations in the same language");
+Check(await translationApplier.ApplyAsync(translatedSeries, default) && translatedSeries.Name == "English series",
+    "Generic translations must use the series name field for series");
+Check(!await translationApplier.ApplyAsync(toEnglish, default) && toEnglish.Writes == 1,
+    "Translated display-title sweeps must be idempotent");
+var laterTranslated = LanguageMovie("3006", "Later imported source title");
+Check(await translationApplier.ApplyAsync(laterTranslated, default) && laterTranslated.Name == "English US",
+    "Approved generic rules must apply to later imports");
+var sourceCorrection = LanguageMovie("3009", "Original before provider correction");
+translationHandler.BeforeResponse = request =>
+{
+    if (request.RequestUri!.AbsolutePath.EndsWith("/translations")) sourceCorrection.SetProviderId(MetadataProvider.Tmdb, "3010");
+};
+Check(!await translationApplier.ApplyAsync(sourceCorrection, default) && sourceCorrection.Writes == 0,
+    "Provider corrections during translation lookup must discard the translated response");
+translationHandler.BeforeResponse = null;
+translationClient.ClearCache();translationHandler.FailNextTranslation = true;
+Check(await translationClient.GetTranslatedTitleAsync("3002", false, "en", default) is null
+    && await translationClient.GetTranslatedTitleAsync("3002", false, "en", default) == "English GB",
+    "Transient translation failures must remain retryable");
+var translatedCancelled = false;
+try { await translationClient.GetTranslatedTitleAsync("3002", false, "en", cancelled.Token); }
+catch (OperationCanceledException) { translatedCancelled = true; }
+Check(translatedCancelled, "Translated-title cache hits must respect cancellation");
+var targetChange = System.Text.Json.JsonSerializer.Deserialize<PluginConfiguration>(System.Text.Json.JsonSerializer.Serialize(config))!;
+targetChange.Libraries[0].Rules[0].DefaultTitleLanguage = "de";
+plugin.UpdateConfiguration(targetChange);config = plugin.Configuration;
+Check(config.OriginalTitleApprovedScopes.Count == 1 && !await translationApplier.ApplyAsync(LanguageMovie("3006", "Do not use unapproved German"), default),
+    "Changing the default target must revoke the affected approval while preserving unrelated series approval");
+plugin = new Plugin(paths, serializer);config = plugin.Configuration;
+Check(config.Libraries[0].Rules[0].DefaultTitleLanguage == "de"
+    && config.Libraries[0].Rules[0].LanguageRules.Single(r => r.Language == "es").TitleLanguage == "pt-BR",
+    "Generic target languages must survive XML reloads");
+await controller.RollbackOriginalTitles(default);
+Check(toEnglish.Name == "English 3002" && !toEnglish.LockedFields.Contains(MetadataField.Name),
+    "The title journal must also roll back translated titles safely");
 Console.WriteLine($"Passed {passed} safety checks.");
 
 public class Stub<T> : DispatchProxy where T : class
@@ -771,5 +874,41 @@ public sealed class SourceLanguageHandler : HttpMessageHandler
         {
             Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(new { original_language = language })),
         });
+    }
+}
+
+public sealed class TranslationHandler : HttpMessageHandler
+{
+    public Action<HttpRequestMessage>? BeforeResponse { get; set; }
+    public bool FailNextTranslation { get; set; }
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        BeforeResponse?.Invoke(request);
+        var path = request.RequestUri!.AbsolutePath;
+        var isTranslation = path.EndsWith("/translations");
+        var id = request.RequestUri.Segments[isTranslation ? ^2 : ^1].Trim('/');
+        if (isTranslation && FailNextTranslation)
+        {
+            FailNextTranslation = false;
+            return Task.FromException<HttpResponseMessage>(new TaskCanceledException("Temporary translation timeout"));
+        }
+        var language = id switch { "3001" => "pl", "3003" => "fr", "3004" => "en", "3005" => "de", "3006" => "zh", "3007" => "es", _ => "ja" };
+        var translations = new List<object>();
+        void Add(string lang, string region, string title) => translations.Add(new
+        {
+            iso_639_1 = lang, iso_3166_1 = region,
+            data = new { title, name = title == "English GB" ? "English series" : title },
+        });
+        Add("ja", "JP", "日本語");
+        if (id != "3005")
+        {
+            Add("en", "US", "English US");
+            if (id != "3006") Add("en", "GB", "English GB");
+        }
+        Add("pl", "PL", "Polskie tłumaczenie");Add("pt", "PT", "Título português");Add("pt", "BR", "Título brasileiro");
+        var payload = isTranslation
+            ? System.Text.Json.JsonSerializer.Serialize(new { translations })
+            : System.Text.Json.JsonSerializer.Serialize(new { original_language = language, title = "Unverified fallback title" });
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(payload) });
     }
 }

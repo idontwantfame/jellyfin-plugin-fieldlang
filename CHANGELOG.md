@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.3.0.0 — Unreleased
+
+- Add a generic translated-title action to each source-language rule and the default action.
+  Choose any two-letter target language with an optional region, such as en, pl or pt-BR.
+- Read explicit translations from TMDb. Missing translations leave the current title alone,
+  rather than accepting a provider fallback in a different language. Prefer the chosen region;
+  bare English prefers GB then US. Support movie titles and series names.
+- Bind approvals to target languages as well as actions. Preserve existing 2.2 approvals when
+  no translated-title actions are configured. Reuse title backups, manual-edit protection and rollback.
+- Cover native/translated/keep combinations, future imports, regional fallback, missing translations,
+  concurrent provider corrections, transient failures, cancellation, XML reloads and target approval changes.
+
 ## 2.2.0.0 — Unreleased
 
 - Add display-title language rules to each library's movie/series original-title settings.
